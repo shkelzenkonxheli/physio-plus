@@ -1,0 +1,1 @@
+DROP FUNCTION IF EXISTS public.admin_upsert_clinic(uuid, text, uuid, text, text, text, boolean);
