@@ -13,8 +13,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SlugRouteImport } from './routes/$slug'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as HyrRouteImport } from './routes/hyr'
+import { Route as KlinikaRouteImport } from './routes/klinika'
 import { Route as KontaktiRouteImport } from './routes/kontakti'
 import { Route as PaneliRouteImport } from './routes/paneli'
+import { Route as ProfiliProfesionalRouteImport } from './routes/profili-profesional'
 import { Route as RegjistrohuRouteImport } from './routes/regjistrohu'
 import { Route as RegjistrohuFizioterapeutRouteImport } from './routes/regjistrohu-fizioterapeut'
 import { Route as FizioterapeutetIndexRouteImport } from './routes/fizioterapeutet.index'
@@ -43,6 +45,11 @@ const HyrRoute = HyrRouteImport.update({
   path: '/hyr',
   getParentRoute: () => rootRouteImport,
 } as any)
+const KlinikaRoute = KlinikaRouteImport.update({
+  id: '/klinika',
+  path: '/klinika',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const KontaktiRoute = KontaktiRouteImport.update({
   id: '/kontakti',
   path: '/kontakti',
@@ -51,6 +58,11 @@ const KontaktiRoute = KontaktiRouteImport.update({
 const PaneliRoute = PaneliRouteImport.update({
   id: '/paneli',
   path: '/paneli',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProfiliProfesionalRoute = ProfiliProfesionalRouteImport.update({
+  id: '/profili-profesional',
+  path: '/profili-profesional',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RegjistrohuRoute = RegjistrohuRouteImport.update({
@@ -95,8 +107,10 @@ export interface FileRoutesByFullPath {
   '/$slug': typeof SlugRoute
   '/admin': typeof AdminRoute
   '/hyr': typeof HyrRoute
+  '/klinika': typeof KlinikaRoute
   '/kontakti': typeof KontaktiRoute
   '/paneli': typeof PaneliRoute
+  '/profili-profesional': typeof ProfiliProfesionalRoute
   '/regjistrohu': typeof RegjistrohuRoute
   '/regjistrohu-fizioterapeut': typeof RegjistrohuFizioterapeutRoute
   '/fizioterapeutet/$qyteti': typeof FizioterapeutetQytetiRoute
@@ -110,8 +124,10 @@ export interface FileRoutesByTo {
   '/$slug': typeof SlugRoute
   '/admin': typeof AdminRoute
   '/hyr': typeof HyrRoute
+  '/klinika': typeof KlinikaRoute
   '/kontakti': typeof KontaktiRoute
   '/paneli': typeof PaneliRoute
+  '/profili-profesional': typeof ProfiliProfesionalRoute
   '/regjistrohu': typeof RegjistrohuRoute
   '/regjistrohu-fizioterapeut': typeof RegjistrohuFizioterapeutRoute
   '/fizioterapeutet/$qyteti': typeof FizioterapeutetQytetiRoute
@@ -126,8 +142,10 @@ export interface FileRoutesById {
   '/$slug': typeof SlugRoute
   '/admin': typeof AdminRoute
   '/hyr': typeof HyrRoute
+  '/klinika': typeof KlinikaRoute
   '/kontakti': typeof KontaktiRoute
   '/paneli': typeof PaneliRoute
+  '/profili-profesional': typeof ProfiliProfesionalRoute
   '/regjistrohu': typeof RegjistrohuRoute
   '/regjistrohu-fizioterapeut': typeof RegjistrohuFizioterapeutRoute
   '/fizioterapeutet/$qyteti': typeof FizioterapeutetQytetiRoute
@@ -143,8 +161,10 @@ export interface FileRouteTypes {
     | '/$slug'
     | '/admin'
     | '/hyr'
+    | '/klinika'
     | '/kontakti'
     | '/paneli'
+    | '/profili-profesional'
     | '/regjistrohu'
     | '/regjistrohu-fizioterapeut'
     | '/fizioterapeutet/$qyteti'
@@ -158,8 +178,10 @@ export interface FileRouteTypes {
     | '/$slug'
     | '/admin'
     | '/hyr'
+    | '/klinika'
     | '/kontakti'
     | '/paneli'
+    | '/profili-profesional'
     | '/regjistrohu'
     | '/regjistrohu-fizioterapeut'
     | '/fizioterapeutet/$qyteti'
@@ -173,8 +195,10 @@ export interface FileRouteTypes {
     | '/$slug'
     | '/admin'
     | '/hyr'
+    | '/klinika'
     | '/kontakti'
     | '/paneli'
+    | '/profili-profesional'
     | '/regjistrohu'
     | '/regjistrohu-fizioterapeut'
     | '/fizioterapeutet/$qyteti'
@@ -189,8 +213,10 @@ export interface RootRouteChildren {
   SlugRoute: typeof SlugRoute
   AdminRoute: typeof AdminRoute
   HyrRoute: typeof HyrRoute
+  KlinikaRoute: typeof KlinikaRoute
   KontaktiRoute: typeof KontaktiRoute
   PaneliRoute: typeof PaneliRoute
+  ProfiliProfesionalRoute: typeof ProfiliProfesionalRoute
   RegjistrohuRoute: typeof RegjistrohuRoute
   RegjistrohuFizioterapeutRoute: typeof RegjistrohuFizioterapeutRoute
   FizioterapeutetQytetiRoute: typeof FizioterapeutetQytetiRoute
@@ -230,6 +256,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof HyrRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/klinika': {
+      id: '/klinika'
+      path: '/klinika'
+      fullPath: '/klinika'
+      preLoaderRoute: typeof KlinikaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/kontakti': {
       id: '/kontakti'
       path: '/kontakti'
@@ -242,6 +275,13 @@ declare module '@tanstack/react-router' {
       path: '/paneli'
       fullPath: '/paneli'
       preLoaderRoute: typeof PaneliRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/profili-profesional': {
+      id: '/profili-profesional'
+      path: '/profili-profesional'
+      fullPath: '/profili-profesional'
+      preLoaderRoute: typeof ProfiliProfesionalRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/regjistrohu': {
@@ -301,8 +341,10 @@ const rootRouteChildren: RootRouteChildren = {
   SlugRoute: SlugRoute,
   AdminRoute: AdminRoute,
   HyrRoute: HyrRoute,
+  KlinikaRoute: KlinikaRoute,
   KontaktiRoute: KontaktiRoute,
   PaneliRoute: PaneliRoute,
+  ProfiliProfesionalRoute: ProfiliProfesionalRoute,
   RegjistrohuRoute: RegjistrohuRoute,
   RegjistrohuFizioterapeutRoute: RegjistrohuFizioterapeutRoute,
   FizioterapeutetQytetiRoute: FizioterapeutetQytetiRoute,

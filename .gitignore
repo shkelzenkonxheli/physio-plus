@@ -24,6 +24,8 @@ dist-ssr
 
 # Lovable / local tooling
 .lovable/
+supabase/.branches/
+supabase/.temp/
 
 # Wrangler / Cloudflare
 .wrangler/

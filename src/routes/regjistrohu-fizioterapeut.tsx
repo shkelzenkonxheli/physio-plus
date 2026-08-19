@@ -19,6 +19,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { fetchRegions } from "@/lib/queries";
 import { translateError } from "@/lib/labels";
+import { useAuth } from "@/lib/auth";
 import { PENDING_PHYSIO_KEY } from "@/components/panel/CreateProfileForm";
 
 export const Route = createFileRoute("/regjistrohu-fizioterapeut")({
@@ -41,22 +42,22 @@ export const Route = createFileRoute("/regjistrohu-fizioterapeut")({
   component: PhysioSignupPage,
 });
 
-const schema = z
-  .object({
-    firstName: z.string().trim().min(2, "Emri duhet të ketë së paku 2 shkronja").max(60),
-    lastName: z.string().trim().min(2, "Mbiemri duhet të ketë së paku 2 shkronja").max(60),
-    email: z.string().trim().email("Email-i nuk është i vlefshëm").max(255),
-    phone: z.string().trim().min(6, "Numri i telefonit nuk është i vlefshëm").max(30),
-    password: z.string().min(8, "Fjalëkalimi duhet të ketë së paku 8 karaktere").max(72),
-    professionalTitle: z.string().trim().max(120).optional(),
-    licenseNumber: z.string().trim().max(60).optional(),
-    regionId: z.string().uuid("Zgjidh regjionin"),
-    cityId: z.string().uuid("Zgjidh qytetin"),
-    bio: z.string().trim().max(1500).optional(),
-  });
+const schema = z.object({
+  firstName: z.string().trim().min(2, "Emri duhet të ketë së paku 2 shkronja").max(60),
+  lastName: z.string().trim().min(2, "Mbiemri duhet të ketë së paku 2 shkronja").max(60),
+  email: z.string().trim().email("Email-i nuk është i vlefshëm").max(255),
+  phone: z.string().trim().min(6, "Numri i telefonit nuk është i vlefshëm").max(30),
+  password: z.string().min(8, "Fjalëkalimi duhet të ketë së paku 8 karaktere").max(72),
+  professionalTitle: z.string().trim().max(120).optional(),
+  licenseNumber: z.string().trim().max(60).optional(),
+  regionId: z.string().uuid("Zgjidh regjionin"),
+  cityId: z.string().uuid("Zgjidh qytetin"),
+  bio: z.string().trim().max(1500).optional(),
+});
 
 function PhysioSignupPage() {
   const navigate = useNavigate();
+  const { refresh } = useAuth();
   const [done, setDone] = useState(false);
   const [busy, setBusy] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -139,6 +140,7 @@ function PhysioSignupPage() {
         toast.error(translateError(insertError));
         return;
       }
+      await refresh();
       window.localStorage.removeItem(PENDING_PHYSIO_KEY);
       toast.success("Profili u krijua! Vazhdo me plotësimin e shërbimeve.");
       void navigate({ to: "/paneli" });
@@ -181,11 +183,43 @@ function PhysioSignupPage() {
           className="mt-8 space-y-5 rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8"
         >
           <div className="grid gap-4 sm:grid-cols-2">
-            <F id="firstName" label="Emri" v={form.firstName} e={errors["firstName"]} on={(x) => setForm({ ...form, firstName: x })} />
-            <F id="lastName" label="Mbiemri" v={form.lastName} e={errors["lastName"]} on={(x) => setForm({ ...form, lastName: x })} />
-            <F id="email" label="Email" type="email" v={form.email} e={errors["email"]} on={(x) => setForm({ ...form, email: x })} />
-            <F id="phone" label="Telefoni" v={form.phone} e={errors["phone"]} on={(x) => setForm({ ...form, phone: x })} />
-            <F id="password" label="Fjalëkalimi" type="password" v={form.password} e={errors["password"]} on={(x) => setForm({ ...form, password: x })} />
+            <F
+              id="firstName"
+              label="Emri"
+              v={form.firstName}
+              e={errors["firstName"]}
+              on={(x) => setForm({ ...form, firstName: x })}
+            />
+            <F
+              id="lastName"
+              label="Mbiemri"
+              v={form.lastName}
+              e={errors["lastName"]}
+              on={(x) => setForm({ ...form, lastName: x })}
+            />
+            <F
+              id="email"
+              label="Email"
+              type="email"
+              v={form.email}
+              e={errors["email"]}
+              on={(x) => setForm({ ...form, email: x })}
+            />
+            <F
+              id="phone"
+              label="Telefoni"
+              v={form.phone}
+              e={errors["phone"]}
+              on={(x) => setForm({ ...form, phone: x })}
+            />
+            <F
+              id="password"
+              label="Fjalëkalimi"
+              type="password"
+              v={form.password}
+              e={errors["password"]}
+              on={(x) => setForm({ ...form, password: x })}
+            />
             <F
               id="professionalTitle"
               label="Titulli profesional"

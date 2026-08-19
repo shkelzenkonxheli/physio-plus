@@ -71,7 +71,7 @@ function SignupPage() {
     }
     setErrors({});
     setBusy(true);
-    const { error } = await supabase.auth.signUp({
+    const { data: signUpData, error } = await supabase.auth.signUp({
       email: parsed.data.email,
       password: parsed.data.password,
       options: {
@@ -89,6 +89,7 @@ function SignupPage() {
       toast.error(translateError(error));
       return;
     }
+
     toast.success("Llogaria u krijua! Kontrollo email-in për konfirmim.");
   }
 
@@ -110,20 +111,60 @@ function SignupPage() {
           </p>
           <form onSubmit={onSubmit} className="mt-6 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
-              <F id="firstName" label="Emri" v={form.firstName} e={errors["firstName"]} on={(x) => setForm({ ...form, firstName: x })} />
-              <F id="lastName" label="Mbiemri" v={form.lastName} e={errors["lastName"]} on={(x) => setForm({ ...form, lastName: x })} />
+              <F
+                id="firstName"
+                label="Emri"
+                v={form.firstName}
+                e={errors["firstName"]}
+                on={(x) => setForm({ ...form, firstName: x })}
+              />
+              <F
+                id="lastName"
+                label="Mbiemri"
+                v={form.lastName}
+                e={errors["lastName"]}
+                on={(x) => setForm({ ...form, lastName: x })}
+              />
             </div>
-            <F id="email" label="Email" type="email" v={form.email} e={errors["email"]} on={(x) => setForm({ ...form, email: x })} />
-            <F id="phone" label="Telefoni (opsional)" v={form.phone} e={errors["phone"]} on={(x) => setForm({ ...form, phone: x })} />
-            <F id="password" label="Fjalëkalimi" type="password" v={form.password} e={errors["password"]} on={(x) => setForm({ ...form, password: x })} />
-            <F id="confirm" label="Konfirmo fjalëkalimin" type="password" v={form.confirm} e={errors["confirm"]} on={(x) => setForm({ ...form, confirm: x })} />
+            <F
+              id="email"
+              label="Email"
+              type="email"
+              v={form.email}
+              e={errors["email"]}
+              on={(x) => setForm({ ...form, email: x })}
+            />
+            <F
+              id="phone"
+              label="Telefoni (opsional)"
+              v={form.phone}
+              e={errors["phone"]}
+              on={(x) => setForm({ ...form, phone: x })}
+            />
+            <F
+              id="password"
+              label="Fjalëkalimi"
+              type="password"
+              v={form.password}
+              e={errors["password"]}
+              on={(x) => setForm({ ...form, password: x })}
+            />
+            <F
+              id="confirm"
+              label="Konfirmo fjalëkalimin"
+              type="password"
+              v={form.confirm}
+              e={errors["confirm"]}
+              on={(x) => setForm({ ...form, confirm: x })}
+            />
             <Button type="submit" className="w-full" size="lg" disabled={busy}>
               {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Regjistrohu
             </Button>
           </form>
           <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" /> ose <span className="h-px flex-1 bg-border" />
+            <span className="h-px flex-1 bg-border" /> ose{" "}
+            <span className="h-px flex-1 bg-border" />
           </div>
           <Button variant="outline" className="w-full" size="lg" onClick={() => void google()}>
             Vazhdo me Google
@@ -136,7 +177,10 @@ function SignupPage() {
           </p>
           <p className="mt-2 text-center text-sm text-muted-foreground">
             Je fizioterapeut?{" "}
-            <Link to="/regjistrohu-fizioterapeut" className="font-medium text-primary hover:underline">
+            <Link
+              to="/regjistrohu-fizioterapeut"
+              className="font-medium text-primary hover:underline"
+            >
               Regjistro profilin profesional
             </Link>
           </p>

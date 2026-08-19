@@ -30,26 +30,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setPhysioId(null);
       return;
     }
+
     const [rolesRes, physioRes] = await Promise.all([
       supabase.from("user_roles").select("role").eq("user_id", userId),
       supabase.from("physiotherapists").select("id").eq("user_id", userId).maybeSingle(),
     ]);
+
     setRoles((rolesRes.data ?? []).map((r) => r.role as AppRole));
     setPhysioId(physioRes.data?.id ?? null);
   }
 
+  async function syncAuthState(nextSession: Session | null) {
+    const userId = nextSession?.user?.id;
+    setSession(nextSession);
+    setLoading(true);
+
+    if (!userId) {
+      setRoles([]);
+      setPhysioId(null);
+      setLoading(false);
+      return;
+    }
+
+    await loadMeta(userId);
+    setLoading(false);
+  }
+
   useEffect(() => {
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
-      setSession(next);
-      setTimeout(() => {
-        void loadMeta(next?.user?.id).finally(() => setLoading(false));
-      }, 0);
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, next) => {
+      await syncAuthState(next);
     });
 
     void supabase.auth.getSession().then(async ({ data }) => {
-      setSession(data.session);
-      await loadMeta(data.session?.user?.id);
-      setLoading(false);
+      await syncAuthState(data.session);
     });
 
     return () => sub.subscription.unsubscribe();
@@ -66,13 +79,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isPhysio: roles.includes("PHYSIOTHERAPIST"),
     refresh: async () => {
       const { data } = await supabase.auth.getSession();
-      setSession(data.session);
-      await loadMeta(data.session?.user?.id);
+      await syncAuthState(data.session);
     },
     signOut: async () => {
       await supabase.auth.signOut();
+      setSession(null);
       setRoles([]);
       setPhysioId(null);
+      setLoading(false);
     },
   };
 
