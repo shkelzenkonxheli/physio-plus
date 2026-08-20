@@ -1307,16 +1307,24 @@ export type Database = {
         }
       }
       available_slots: {
-        Args: { _date: string; _physio_id: string; _service_id: string }
+        Args: {
+          _clinic_id?: string
+          _date: string
+          _location_id?: string
+          _physio_id: string
+          _service_id: string
+        }
         Returns: {
           slot: string
         }[]
       }
       book_appointment: {
         Args: {
+          _clinic_id?: string
           _email: string
           _first_name: string
           _last_name: string
+          _location_id?: string
           _message?: string
           _phone: string
           _physio_id: string
@@ -1349,6 +1357,16 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      booking_locations: {
+        Args: { _physio_id: string; _service_id: string }
+        Returns: {
+          clinic_id: string
+          id: string
+          is_default: boolean
+          name: string
+          address: string | null
+        }[]
       }
       create_my_physio_profile: {
         Args: {

@@ -14,20 +14,20 @@ Clinics are not yet complete tenants with members, locations, and integrated boo
 
 ## 2. Current Tables and Responsibilities
 
-| Area | Tables |
-|---|---|
-| Authentication | `profiles`, `user_roles` |
-| Physiotherapists | `physiotherapists`, `physiotherapist_specializations` |
-| Services | `service_categories`, `services` |
-| Availability | `working_hours`, `availability_exceptions`, `blocked_times` |
-| Booking | `appointments`, `appointment_holds` |
-| Clinics | `clinics` |
-| Clinic content | `clinic_service_categories`, `clinic_services`, `clinic_working_hours`, `clinic_days_off` |
-| Gallery | `profile_gallery_images` |
-| Billing | `plans`, `subscriptions`, `subscription_events` |
-| Reviews | `reviews` |
-| Notifications | `notifications` |
-| Auditing | `audit_logs` |
+| Area             | Tables                                                                                    |
+| ---------------- | ----------------------------------------------------------------------------------------- |
+| Authentication   | `profiles`, `user_roles`                                                                  |
+| Physiotherapists | `physiotherapists`, `physiotherapist_specializations`                                     |
+| Services         | `service_categories`, `services`                                                          |
+| Availability     | `working_hours`, `availability_exceptions`, `blocked_times`                               |
+| Booking          | `appointments`, `appointment_holds`                                                       |
+| Clinics          | `clinics`                                                                                 |
+| Clinic content   | `clinic_service_categories`, `clinic_services`, `clinic_working_hours`, `clinic_days_off` |
+| Gallery          | `profile_gallery_images`                                                                  |
+| Billing          | `plans`, `subscriptions`, `subscription_events`                                           |
+| Reviews          | `reviews`                                                                                 |
+| Notifications    | `notifications`                                                                           |
+| Auditing         | `audit_logs`                                                                              |
 
 The base schema is defined in `supabase/migrations/20260817190954_3a74b855-bb18-4880-8a6f-c6ffa23ce4c4.sql`.
 

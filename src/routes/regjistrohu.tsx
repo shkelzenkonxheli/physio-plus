@@ -11,7 +11,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { translateError } from "@/lib/labels";
 import { useAuth } from "@/lib/auth";
 
+type SignupSearch = { invite?: string | undefined };
 export const Route = createFileRoute("/regjistrohu")({
+  validateSearch: (search: Record<string, unknown>): SignupSearch => ({
+    invite: typeof search["invite"] === "string" ? search["invite"] : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Krijo llogari klienti | PhysioPlus" },
@@ -43,6 +47,7 @@ const schema = z
   });
 
 function SignupPage() {
+  const { invite } = Route.useSearch();
   const navigate = useNavigate();
   const { user, loading } = useAuth();
   const [form, setForm] = useState({
@@ -57,8 +62,13 @@ function SignupPage() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!loading && user) void navigate({ to: "/llogaria", replace: true });
-  }, [user, loading, navigate]);
+    if (!loading && user)
+      void navigate({
+        to: invite ? "/hyr" : "/llogaria",
+        search: invite ? { invite } : {},
+        replace: true,
+      });
+  }, [user, loading, navigate, invite]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -75,7 +85,9 @@ function SignupPage() {
       email: parsed.data.email,
       password: parsed.data.password,
       options: {
-        emailRedirectTo: `${window.location.origin}/llogaria`,
+        emailRedirectTo: invite
+          ? `${window.location.origin}/hyr?invite=${encodeURIComponent(invite)}`
+          : `${window.location.origin}/llogaria`,
         data: {
           first_name: parsed.data.firstName,
           last_name: parsed.data.lastName,
@@ -96,7 +108,9 @@ function SignupPage() {
   async function google() {
     const { lovable } = await import("@/integrations/lovable/index");
     const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
+      redirect_uri: invite
+        ? `${window.location.origin}/hyr?invite=${encodeURIComponent(invite)}`
+        : window.location.origin,
     });
     if (result.error) toast.error("Regjistrimi me Google dështoi. Provo përsëri.");
   }

@@ -11,7 +11,12 @@ import { supabase } from "@/integrations/supabase/client";
 import { translateError } from "@/lib/labels";
 import { useAuth } from "@/lib/auth";
 
+type LoginSearch = { invite?: string | undefined };
+
 export const Route = createFileRoute("/hyr")({
+  validateSearch: (search: Record<string, unknown>): LoginSearch => ({
+    invite: typeof search["invite"] === "string" ? search["invite"] : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Kyçu në llogarinë tënde | PhysioPlus" },
@@ -34,16 +39,30 @@ const schema = z.object({
 
 function LoginPage() {
   const navigate = useNavigate();
+  const { invite } = Route.useSearch();
   const { user, isAdmin, isPhysio, loading } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [acceptingInvite, setAcceptingInvite] = useState(false);
 
   useEffect(() => {
     if (loading || !user) return;
+    if (invite) {
+      if (acceptingInvite) return;
+      setAcceptingInvite(true);
+      void supabase
+        .rpc("accept_clinic_invitation" as never, { _token: invite } as never)
+        .then(({ error }) => {
+          if (error) toast.error(translateError(error));
+          else toast.success("Ftesa e klinikës u pranua.");
+          void navigate({ to: "/paneli", replace: true });
+        });
+      return;
+    }
     void navigate({ to: isAdmin ? "/admin" : isPhysio ? "/paneli" : "/llogaria", replace: true });
-  }, [user, loading, isAdmin, isPhysio, navigate]);
+  }, [user, loading, isAdmin, isPhysio, navigate, invite, acceptingInvite]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -68,7 +87,9 @@ function LoginPage() {
   async function google() {
     const { lovable } = await import("@/integrations/lovable/index");
     const result = await lovable.auth.signInWithOAuth("google", {
-      redirect_uri: window.location.origin,
+      redirect_uri: invite
+        ? `${window.location.origin}/hyr?invite=${encodeURIComponent(invite)}`
+        : window.location.origin,
     });
     if (result.error) {
       toast.error("Kyçja me Google dështoi. Provo përsëri.");
@@ -81,9 +102,7 @@ function LoginPage() {
       <div className="mx-auto max-w-md px-4 py-16">
         <div className="rounded-3xl border border-border bg-card p-8 shadow-card">
           <h1 className="text-2xl font-bold">Kyçu</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Mirë se erdhe përsëri në PhysioPlus.
-          </p>
+          <p className="mt-1 text-sm text-muted-foreground">Mirë se erdhe përsëri në PhysioPlus.</p>
           <form onSubmit={onSubmit} className="mt-6 space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
@@ -117,14 +136,19 @@ function LoginPage() {
             </Button>
           </form>
           <div className="my-5 flex items-center gap-3 text-xs text-muted-foreground">
-            <span className="h-px flex-1 bg-border" /> ose <span className="h-px flex-1 bg-border" />
+            <span className="h-px flex-1 bg-border" /> ose{" "}
+            <span className="h-px flex-1 bg-border" />
           </div>
           <Button variant="outline" className="w-full" size="lg" onClick={() => void google()}>
             Vazhdo me Google
           </Button>
           <p className="mt-6 text-center text-sm text-muted-foreground">
             Nuk ke llogari?{" "}
-            <Link to="/regjistrohu" className="font-medium text-primary hover:underline">
+            <Link
+              to="/regjistrohu"
+              search={invite ? { invite } : {}}
+              className="font-medium text-primary hover:underline"
+            >
               Regjistrohu
             </Link>
           </p>

@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { z } from "zod";
 import { toast } from "sonner";
-import { CalendarDays, CheckCircle2, ChevronLeft, Clock, Loader2 } from "lucide-react";
+import { CalendarDays, CheckCircle2, ChevronLeft, Clock, Loader2, MapPin } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { BookingCalendar } from "@/components/site/BookingCalendar";
 import { Button } from "@/components/ui/button";
@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAvailableSlots, fetchPhysioBySlug } from "@/lib/queries";
+import { fetchAvailableSlots, fetchBookingLocations, fetchPhysioBySlug } from "@/lib/queries";
 import { formatDuration, formatPrice, formatTime, formatLongDate, toDateKey } from "@/lib/format";
 import { translateError } from "@/lib/labels";
 import { serviceIcon } from "@/lib/service-icons";
@@ -70,6 +70,7 @@ function BookingPage() {
 
   const initialService = services.find((s) => s.id === search.sherbimi) ?? null;
   const [serviceId, setServiceId] = useState<string | null>(initialService?.id ?? null);
+  const [locationId, setLocationId] = useState<string | null>(null);
   const [date, setDate] = useState<string>(toDateKey(new Date()));
   const [slot, setSlot] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -123,15 +124,35 @@ function BookingPage() {
     setForm((f) => ({ ...f, email: f.email || (user.email ?? "") }));
   }, [user]);
 
+  const { data: bookingLocations = [], isLoading: locationsLoading } = useQuery({
+    queryKey: ["booking-locations", physio.id, serviceId],
+    queryFn: () => fetchBookingLocations(physio.id, serviceId as string),
+    enabled: Boolean(serviceId),
+  });
+
+  useEffect(() => {
+    if (bookingLocations.length === 1) {
+      setLocationId(bookingLocations[0]?.id ?? null);
+    } else if (!bookingLocations.some((location) => location.id === locationId)) {
+      setLocationId(null);
+    }
+  }, [bookingLocations, locationId]);
+
+  const bookingLocation = bookingLocations.find((location) => location.id === locationId) ?? null;
+
   const { data: slots = [], isLoading: slotsLoading } = useQuery({
-    queryKey: ["slots", physio.id, serviceId, date],
-    queryFn: () => fetchAvailableSlots(physio.id, serviceId as string, date),
-    enabled: Boolean(serviceId && date),
+    queryKey: ["slots", physio.id, serviceId, locationId, date],
+    queryFn: () =>
+      fetchAvailableSlots(physio.id, serviceId as string, date, {
+        clinicId: bookingLocation?.clinic_id as string,
+        locationId: locationId as string,
+      }),
+    enabled: Boolean(serviceId && locationId && bookingLocation && date),
   });
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!service || !slot) return;
+    if (!service || !slot || !bookingLocation) return;
     const parsed = clientSchema.safeParse(form);
     if (!parsed.success) {
       const fieldErrors: Record<string, string> = {};
@@ -144,6 +165,8 @@ function BookingPage() {
     setErrors({});
     setSubmitting(true);
     const { data, error } = await supabase.rpc("book_appointment", {
+      _clinic_id: bookingLocation.clinic_id,
+      _location_id: bookingLocation.id,
       _physio_id: physio.id,
       _service_id: service.id,
       _start_at: slot,
@@ -243,42 +266,44 @@ function BookingPage() {
                       {g.items.map((s) => {
                         const Icon = serviceIcon(s.name, s.description);
                         return (
-                        <button
-                          key={s.id}
-                          onClick={() => {
-                            setServiceId(s.id);
-                            setSlot(null);
-                            requestAnimationFrame(() =>
-                              document
-                                .getElementById("hapi-kalendari")
-                                ?.scrollIntoView({ behavior: "smooth", block: "start" }),
-                            );
-                          }}
-                          className={cn(
-                            "flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition-colors",
-                            serviceId === s.id
-                              ? "border-primary bg-primary/5"
-                              : "border-border bg-card hover:bg-muted/60",
-                          )}
-                        >
-                          <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-                            <Icon className="h-11 w-11" strokeWidth={1.5} />
-                          </span>
-                          <span className="min-w-0 flex-1">
-                            <span className="block font-semibold">{s.name}</span>
-                            {s.description ? (
-                              <span className="block text-sm text-muted-foreground">
-                                {s.description}
-                              </span>
-                            ) : null}
-                            <span className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
-                              <Clock className="h-3.5 w-3.5" /> {formatDuration(s.duration_minutes)}
+                          <button
+                            key={s.id}
+                            onClick={() => {
+                              setServiceId(s.id);
+                              setLocationId(null);
+                              setSlot(null);
+                              requestAnimationFrame(() =>
+                                document
+                                  .getElementById("hapi-lokacioni")
+                                  ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+                              );
+                            }}
+                            className={cn(
+                              "flex w-full items-center gap-4 rounded-2xl border p-4 text-left transition-colors",
+                              serviceId === s.id
+                                ? "border-primary bg-primary/5"
+                                : "border-border bg-card hover:bg-muted/60",
+                            )}
+                          >
+                            <span className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                              <Icon className="h-11 w-11" strokeWidth={1.5} />
                             </span>
-                          </span>
-                          <span className="shrink-0 font-bold text-primary">
-                            {formatPrice(s.price, s.currency)}
-                          </span>
-                        </button>
+                            <span className="min-w-0 flex-1">
+                              <span className="block font-semibold">{s.name}</span>
+                              {s.description ? (
+                                <span className="block text-sm text-muted-foreground">
+                                  {s.description}
+                                </span>
+                              ) : null}
+                              <span className="mt-1 flex items-center gap-1 text-sm text-muted-foreground">
+                                <Clock className="h-3.5 w-3.5" />{" "}
+                                {formatDuration(s.duration_minutes)}
+                              </span>
+                            </span>
+                            <span className="shrink-0 font-bold text-primary">
+                              {formatPrice(s.price, s.currency)}
+                            </span>
+                          </button>
                         );
                       })}
                     </div>
@@ -288,8 +313,50 @@ function BookingPage() {
             </section>
 
             {service ? (
+              <section id="hapi-lokacioni" className="scroll-mt-24">
+                <h2 className="font-semibold">2. Zgjidh lokacionin</h2>
+                {locationsLoading ? (
+                  <Skeleton className="mt-3 h-20 rounded-2xl" />
+                ) : bookingLocations.length ? (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {bookingLocations.map((location) => (
+                      <button
+                        key={location.id}
+                        type="button"
+                        onClick={() => {
+                          setLocationId(location.id);
+                          setSlot(null);
+                        }}
+                        className={cn(
+                          "flex items-start gap-3 rounded-2xl border p-4 text-left transition-colors",
+                          locationId === location.id
+                            ? "border-primary bg-primary/5"
+                            : "border-border bg-card hover:bg-muted/60",
+                        )}
+                      >
+                        <MapPin className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                        <span>
+                          <span className="block font-semibold">{location.name}</span>
+                          {location.address ? (
+                            <span className="block text-sm text-muted-foreground">
+                              {location.address}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                    Ky shërbim nuk ka lokacion aktiv për rezervim.
+                  </p>
+                )}
+              </section>
+            ) : null}
+
+            {service && bookingLocation ? (
               <section id="hapi-kalendari" className="scroll-mt-24">
-                <h2 className="font-semibold">2. Zgjidh datën</h2>
+                <h2 className="font-semibold">3. Zgjidh datën</h2>
                 <div className="mt-3">
                   <BookingCalendar
                     value={date}
@@ -302,7 +369,7 @@ function BookingPage() {
                   />
                 </div>
 
-                <h2 className="mt-6 font-semibold">3. Zgjidh orën</h2>
+                <h2 className="mt-6 font-semibold">4. Zgjidh orën</h2>
                 {slotsLoading ? (
                   <div className="mt-3 grid grid-cols-3 gap-2 sm:grid-cols-5">
                     {[1, 2, 3, 4, 5].map((i) => (
@@ -328,8 +395,8 @@ function BookingPage() {
                   </div>
                 ) : (
                   <p className="mt-3 flex items-center gap-2 rounded-2xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-                    <CalendarDays className="h-4 w-4" /> Nuk ka orare të lira për këtë ditë. Provo një
-                    datë tjetër.
+                    <CalendarDays className="h-4 w-4" /> Nuk ka orare të lira për këtë ditë. Provo
+                    një datë tjetër.
                   </p>
                 )}
               </section>
@@ -337,8 +404,11 @@ function BookingPage() {
 
             {service && slot ? (
               <section>
-                <h2 className="font-semibold">4. Plotëso të dhënat</h2>
-                <form onSubmit={submit} className="mt-3 space-y-4 rounded-2xl border border-border bg-card p-5 shadow-card">
+                <h2 className="font-semibold">5. Plotëso të dhënat</h2>
+                <form
+                  onSubmit={submit}
+                  className="mt-3 space-y-4 rounded-2xl border border-border bg-card p-5 shadow-card"
+                >
                   <div className="grid gap-4 sm:grid-cols-2">
                     <Field
                       id="firstName"
@@ -386,6 +456,9 @@ function BookingPage() {
 
                   <div className="rounded-2xl bg-muted/60 p-4 text-sm">
                     <Row label="Shërbimi" value={service.name} />
+                    {bookingLocation ? (
+                      <Row label="Lokacioni" value={bookingLocation.name} />
+                    ) : null}
                     <Row label="Data" value={formatLongDate(slot)} />
                     <Row label="Ora" value={formatTime(slot)} />
                     <Row label="Kohëzgjatja" value={formatDuration(service.duration_minutes)} />
@@ -446,7 +519,13 @@ function Field({
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
-      <Input id={id} type={type} value={value} onChange={(e) => onChange(e.target.value)} maxLength={255} />
+      <Input
+        id={id}
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        maxLength={255}
+      />
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
     </div>
   );

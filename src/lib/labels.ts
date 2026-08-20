@@ -38,6 +38,10 @@ export const ROLE_SQ: Record<AppRole, string> = {
 };
 
 const ERROR_SQ: Record<string, string> = {
+  LOCATION_REQUIRED: "Zgjidh lokacionin ku dëshiron ta rezervosh terminin.",
+  BOOKING_LOCATION_NOT_AVAILABLE: "Ky lokacion nuk është aktiv për këtë fizioterapeut.",
+  BOOKING_CLINIC_NOT_OPERATIONAL: "Klinika nuk është aktive për rezervime.",
+  BOOKING_CROSS_CLINIC_CONTEXT: "Të dhënat e rezervimit nuk i përkasin së njëjtës klinikë.",
   SLOT_UNAVAILABLE:
     "Ky termin sapo u rezervua nga një klient tjetër. Ju lutemi zgjidhni një orar tjetër.",
   BOOKING_EXPIRED: "Koha e rezervimit skadoi. Ju lutemi provoni përsëri.",

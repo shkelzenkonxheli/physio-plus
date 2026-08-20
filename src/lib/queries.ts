@@ -57,10 +57,7 @@ export async function fetchSpecializations() {
 }
 
 export async function fetchPhysiotherapists(filters: DirectoryFilters = {}) {
-  let query = supabase
-    .from("physiotherapists")
-    .select(LIST_SELECT)
-    .eq("status", "APPROVED");
+  let query = supabase.from("physiotherapists").select(LIST_SELECT).eq("status", "APPROVED");
 
   if (filters.q) {
     const term = filters.q.replace(/[,%()]/g, " ").trim();
@@ -180,11 +177,26 @@ async function fetchReviewsInner(physioId: string) {
   return data ?? [];
 }
 
-export async function fetchAvailableSlots(physioId: string, serviceId: string, date: string) {
+export async function fetchBookingLocations(physioId: string, serviceId: string) {
+  const { data, error } = await supabase.rpc("booking_locations", {
+    _physio_id: physioId,
+    _service_id: serviceId,
+  });
+  if (error) throw error;
+  return data ?? [];
+}
+
+export async function fetchAvailableSlots(
+  physioId: string,
+  serviceId: string,
+  date: string,
+  context?: { clinicId: string; locationId: string },
+) {
   const { data, error } = await supabase.rpc("available_slots", {
     _physio_id: physioId,
     _service_id: serviceId,
     _date: date,
+    ...(context ? { _clinic_id: context.clinicId, _location_id: context.locationId } : {}),
   });
   if (error) throw error;
   return (data ?? []).map((r: { slot: string }) => r.slot);
