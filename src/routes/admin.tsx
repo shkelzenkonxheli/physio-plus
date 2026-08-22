@@ -26,7 +26,10 @@ export const Route = createFileRoute("/admin")({
   head: () => ({
     meta: [
       { title: "Paneli i administratorit | PhysioPlus" },
-      { name: "description", content: "Aprovo profilet e fizioterapeutëve dhe menaxho platformën." },
+      {
+        name: "description",
+        content: "Aprovo profilet e fizioterapeutëve dhe menaxho platformën.",
+      },
       { property: "og:title", content: "Paneli i administratorit | PhysioPlus" },
       { property: "og:description", content: "Menaxho profilet dhe platformën PhysioPlus." },
       { name: "robots", content: "noindex" },
@@ -63,7 +66,9 @@ function AdminPanel() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("physiotherapists")
-        .select("id, user_id, first_name, last_name, slug, status, created_at, clinic_id, cities(name)")
+        .select(
+          "id, user_id, first_name, last_name, slug, status, created_at, clinic_id, cities(name)",
+        )
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
@@ -76,7 +81,9 @@ function AdminPanel() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("clinics")
-        .select("id, name, slug, description, address, phone, phone2, whatsapp, email, website, logo_url, header_image_url, active, city_id, cities(name)")
+        .select(
+          "id, name, slug, description, address, phone, phone2, whatsapp, email, website, logo_url, header_image_url, active, city_id, cities(name)",
+        )
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
@@ -169,23 +176,28 @@ function AdminPanel() {
 
         <Tabs defaultValue="physios" className="mt-8">
           <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto p-1">
-            <TabsTrigger value="physios" className="shrink-0 whitespace-nowrap">Fizioterapeutët</TabsTrigger>
-            <TabsTrigger value="clinics" className="shrink-0 whitespace-nowrap">Klinikat</TabsTrigger>
-            <TabsTrigger value="subs" className="shrink-0 whitespace-nowrap">Abonimet</TabsTrigger>
+            <TabsTrigger value="physios" className="shrink-0 whitespace-nowrap">
+              Fizioterapeutët
+            </TabsTrigger>
+            <TabsTrigger value="clinics" className="shrink-0 whitespace-nowrap">
+              Klinikat
+            </TabsTrigger>
+            <TabsTrigger value="subs" className="shrink-0 whitespace-nowrap">
+              Abonimet
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="physios" className="mt-6 space-y-6">
-            <AddPhysioForm
-              cities={cities ?? []}
-              clinics={clinics ?? []}
-              onDone={refresh}
-            />
+            <AddPhysioForm cities={cities ?? []} clinics={clinics ?? []} onDone={refresh} />
             {isLoading ? (
               <Skeleton className="h-24 rounded-2xl" />
             ) : physios && physios.length ? (
               <div className="space-y-3">
                 {physios.map((p) => (
-                  <div key={p.id} className="rounded-2xl border border-border bg-card p-5 shadow-card">
+                  <div
+                    key={p.id}
+                    className="rounded-2xl border border-border bg-card p-5 shadow-card"
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-semibold">
                         {p.first_name} {p.last_name}
@@ -202,13 +214,25 @@ function AdminPanel() {
                       <Button size="sm" onClick={() => void setStatus(p.id, "APPROVED")}>
                         Aprovo
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => void setStatus(p.id, "REJECTED")}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void setStatus(p.id, "REJECTED")}
+                      >
                         Refuzo
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => void setStatus(p.id, "SUSPENDED")}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void setStatus(p.id, "SUSPENDED")}
+                      >
                         Suspendo
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => void deletePhysio(p.id)}>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => void deletePhysio(p.id)}
+                      >
                         <Trash2 className="mr-2 h-4 w-4" /> Fshij
                       </Button>
                     </div>
@@ -231,7 +255,7 @@ function AdminPanel() {
                   onDone={refresh}
                   onCancel={() => setEditingClinic(null)}
                 />
-                <ClinicContentManager clinicId={editingClinic.id} clinicName={editingClinic.name} />
+                <ClinicContentManager clinicId={editingClinic.id} currentPhysioId={null} />
               </>
             ) : (
               <ClinicForm cities={cities ?? []} onDone={refresh} />
@@ -239,7 +263,10 @@ function AdminPanel() {
             {clinics && clinics.length ? (
               <div className="space-y-3">
                 {clinics.map((c) => (
-                  <div key={c.id} className="rounded-2xl border border-border bg-card p-5 shadow-card">
+                  <div
+                    key={c.id}
+                    className="rounded-2xl border border-border bg-card p-5 shadow-card"
+                  >
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <p className="font-semibold">{c.name}</p>
                       <span className="rounded-full border border-border px-3 py-1 text-xs font-medium">
@@ -264,7 +291,11 @@ function AdminPanel() {
                         <Pencil className="mr-2 h-4 w-4" />
                         {editingClinic?.id === c.id ? "Mbyll" : "Menaxho"}
                       </Button>
-                      <Button size="sm" variant="destructive" onClick={() => void deleteClinic(c.id)}>
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => void deleteClinic(c.id)}
+                      >
                         <Trash2 className="mr-2 h-4 w-4" /> Fshij
                       </Button>
                     </div>
@@ -400,7 +431,11 @@ function AddPhysioForm({
           </Select>
         </div>
       </div>
-      <Button className="mt-4" disabled={busy || !email || !first || !last} onClick={() => void submit()}>
+      <Button
+        className="mt-4"
+        disabled={busy || !email || !first || !last}
+        onClick={() => void submit()}
+      >
         Shto fizioterapeutin
       </Button>
     </div>
@@ -415,7 +450,11 @@ function SubscriptionRow({
 }: {
   physioId: string;
   name: string;
-  current: { status: string; expires_at: string | null; plans: { code: string; name: string } | null } | null;
+  current: {
+    status: string;
+    expires_at: string | null;
+    plans: { code: string; name: string } | null;
+  } | null;
   onDone: () => void;
 }) {
   const [plan, setPlan] = useState(current?.plans?.code ?? "FREE");

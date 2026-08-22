@@ -6,13 +6,21 @@ import { toast } from "sonner";
 import { CalendarDays, CheckCircle2, ChevronLeft, Clock, Loader2, MapPin } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { BookingCalendar } from "@/components/site/BookingCalendar";
+import { PublicBookingWizard } from "@/components/booking/PublicBookingWizard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAvailableSlots, fetchBookingLocations, fetchPhysioBySlug } from "@/lib/queries";
+import {
+  fetchClinicBookingCatalog,
+  fetchClinicServiceSlots,
+  fetchClinicServiceWorkingDays,
+  fetchPhysioBySlug,
+  fetchServiceLocations,
+  fetchServicePractitioners,
+} from "@/lib/queries";
 import { formatDuration, formatPrice, formatTime, formatLongDate, toDateKey } from "@/lib/format";
 import { translateError } from "@/lib/labels";
 import { serviceIcon } from "@/lib/service-icons";
@@ -57,19 +65,43 @@ const clientSchema = z.object({
   message: z.string().trim().max(500, "Mesazhi është shumë i gjatë").optional(),
 });
 
+const bookingDb = supabase as unknown as {
+  rpc: (
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<{ data: unknown; error: { message: string } | null }>;
+};
+
+function isPublicBookingWizardEnabled() {
+  return true;
+}
+
 function BookingPage() {
   const { physio } = Route.useLoaderData();
   const search = Route.useSearch();
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  const services = (physio.services ?? []).filter((s) => s.active);
-  const categories = [...(physio.service_categories ?? [])]
-    .filter((c) => c.active && services.some((s) => s.category_id === c.id))
-    .sort((a, b) => a.sort_order - b.sort_order);
-
-  const initialService = services.find((s) => s.id === search.sherbimi) ?? null;
-  const [serviceId, setServiceId] = useState<string | null>(initialService?.id ?? null);
+  const clinicId = physio.clinic_id as string;
+  const { data: catalog = [], isLoading: catalogLoading } = useQuery({
+    queryKey: ["public-clinic-booking-catalog", clinicId],
+    queryFn: () => fetchClinicBookingCatalog(clinicId),
+  });
+  const services = useMemo(
+    () =>
+      catalog.map((row) => ({
+        id: row.service_id,
+        category_id: row.category_id,
+        name: row.service_name,
+        description: row.description,
+        duration_minutes: row.duration_minutes,
+        price: Number(row.price),
+        currency: row.currency,
+      })),
+    [catalog],
+  );
+  const [serviceId, setServiceId] = useState<string | null>(search.sherbimi ?? null);
+  const [practitionerChoice, setPractitionerChoice] = useState<string | "any" | null>(null);
   const [locationId, setLocationId] = useState<string | null>(null);
   const [date, setDate] = useState<string>(toDateKey(new Date()));
   const [slot, setSlot] = useState<string | null>(null);
@@ -79,6 +111,8 @@ function BookingPage() {
     price: number;
     serviceName: string;
     duration: number;
+    practitionerName: string;
+    locationName: string;
   }>(null);
   const [form, setForm] = useState({
     firstName: "",
@@ -89,34 +123,55 @@ function BookingPage() {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    if (!search.sherbimi || services.some((item) => item.id === search.sherbimi)) return;
+    const legacy = (physio.services ?? []).find((item) => item.id === search.sherbimi);
+    const mapped = legacy
+      ? services.find(
+          (item) => item.name === legacy.name && item.duration_minutes === legacy.duration_minutes,
+        )
+      : null;
+    setServiceId(mapped?.id ?? null);
+  }, [physio.services, search.sherbimi, services]);
+
   const service = services.find((s) => s.id === serviceId) ?? null;
   const groups = useMemo(() => {
-    const list = categories.map((c) => ({
-      id: c.id,
-      name: c.name,
-      items: services.filter((s) => s.category_id === c.id),
-    }));
-    const rest = services.filter((s) => !categories.some((c) => c.id === s.category_id));
-    if (rest.length) list.push({ id: "__rest", name: "Të tjera", items: rest });
-    return list.filter((g) => g.items.length);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [physio.services, physio.service_categories]);
-  const workingDays = useMemo(
-    () => (physio.working_hours ?? []).filter((h) => h.active).map((h) => h.day_of_week),
-    [physio.working_hours],
-  );
+    const result = new Map<string, { id: string; name: string; items: typeof services }>();
+    for (const row of catalog) {
+      const id = row.category_id ?? "__rest";
+      const group = result.get(id) ?? {
+        id,
+        name: row.category_name ?? "Të tjera",
+        items: [],
+      };
+      const item = services.find((candidate) => candidate.id === row.service_id);
+      if (item) group.items.push(item);
+      result.set(id, group);
+    }
+    return [...result.values()];
+  }, [catalog, services]);
+
+  const { data: practitioners = [], isLoading: practitionersLoading } = useQuery({
+    queryKey: ["public-service-practitioners", clinicId, serviceId],
+    queryFn: () => fetchServicePractitioners(clinicId, serviceId as string),
+    enabled: Boolean(serviceId),
+  });
+  useEffect(() => {
+    if (practitioners.length === 1) setPractitionerChoice(practitioners[0]?.id ?? null);
+  }, [practitioners]);
 
   const { data: closedDates = [] } = useQuery({
-    queryKey: ["closed-dates", physio.id],
+    queryKey: ["closed-dates", practitionerChoice],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("availability_exceptions")
         .select("date, closed")
-        .eq("physiotherapist_id", physio.id)
+        .eq("physiotherapist_id", practitionerChoice as string)
         .eq("closed", true);
       if (error) throw error;
       return (data ?? []).map((r) => r.date as string);
     },
+    enabled: Boolean(practitionerChoice && practitionerChoice !== "any"),
   });
 
   useEffect(() => {
@@ -125,9 +180,14 @@ function BookingPage() {
   }, [user]);
 
   const { data: bookingLocations = [], isLoading: locationsLoading } = useQuery({
-    queryKey: ["booking-locations", physio.id, serviceId],
-    queryFn: () => fetchBookingLocations(physio.id, serviceId as string),
-    enabled: Boolean(serviceId),
+    queryKey: ["booking-locations", clinicId, serviceId, practitionerChoice],
+    queryFn: () =>
+      fetchServiceLocations(
+        clinicId,
+        serviceId as string,
+        practitionerChoice === "any" ? null : (practitionerChoice as string),
+      ),
+    enabled: Boolean(serviceId && practitionerChoice),
   });
 
   useEffect(() => {
@@ -140,14 +200,29 @@ function BookingPage() {
 
   const bookingLocation = bookingLocations.find((location) => location.id === locationId) ?? null;
 
-  const { data: slots = [], isLoading: slotsLoading } = useQuery({
-    queryKey: ["slots", physio.id, serviceId, locationId, date],
+  const { data: workingDays = [] } = useQuery({
+    queryKey: ["booking-working-days", clinicId, serviceId, practitionerChoice, locationId],
     queryFn: () =>
-      fetchAvailableSlots(physio.id, serviceId as string, date, {
-        clinicId: bookingLocation?.clinic_id as string,
-        locationId: locationId as string,
-      }),
-    enabled: Boolean(serviceId && locationId && bookingLocation && date),
+      fetchClinicServiceWorkingDays(
+        clinicId,
+        locationId as string,
+        serviceId as string,
+        practitionerChoice === "any" ? null : (practitionerChoice as string),
+      ),
+    enabled: Boolean(serviceId && locationId && bookingLocation),
+  });
+
+  const { data: slots = [], isLoading: slotsLoading } = useQuery({
+    queryKey: ["slots", clinicId, serviceId, practitionerChoice, locationId, date],
+    queryFn: () =>
+      fetchClinicServiceSlots(
+        clinicId,
+        locationId as string,
+        serviceId as string,
+        date,
+        practitionerChoice === "any" ? null : (practitionerChoice as string),
+      ),
+    enabled: Boolean(serviceId && practitionerChoice && locationId && bookingLocation && date),
   });
 
   async function submit(e: React.FormEvent) {
@@ -164,11 +239,11 @@ function BookingPage() {
     }
     setErrors({});
     setSubmitting(true);
-    const { data, error } = await supabase.rpc("book_appointment", {
-      _clinic_id: bookingLocation.clinic_id,
+    const { data, error } = await bookingDb.rpc("book_clinic_service_appointment", {
+      _clinic_id: clinicId,
       _location_id: bookingLocation.id,
-      _physio_id: physio.id,
-      _service_id: service.id,
+      _clinic_service_id: service.id,
+      _physio_id: practitionerChoice === "any" ? null : practitionerChoice,
       _start_at: slot,
       _first_name: parsed.data.firstName,
       _last_name: parsed.data.lastName,
@@ -182,13 +257,74 @@ function BookingPage() {
       setSlot(null);
       return;
     }
-    const appt = data as unknown as { start_at: string; price: number };
+    const appt = data as unknown as {
+      start_at: string;
+      price: number;
+      physiotherapist_id: string;
+    };
+    const assigned = practitioners.find((item) => item.id === appt.physiotherapist_id);
     setConfirmed({
       start: appt.start_at,
       price: Number(appt.price),
       serviceName: service.name,
       duration: service.duration_minutes,
+      practitionerName: assigned
+        ? `${assigned.first_name} ${assigned.last_name}`
+        : "Profesionisti i caktuar",
+      locationName: bookingLocation.name,
     });
+  }
+
+  // The public booking experience is intentionally a focused, step-by-step
+  // wizard. The existing booking queries and RPC remain the source of truth.
+  if (isPublicBookingWizardEnabled()) {
+    return (
+      <SiteLayout>
+        <PublicBookingWizard
+          groups={groups}
+          catalogLoading={catalogLoading}
+          service={service}
+          selectService={(id) => {
+            setServiceId(id);
+            setPractitionerChoice(null);
+            setLocationId(null);
+            setSlot(null);
+          }}
+          practitioners={practitioners}
+          practitionersLoading={practitionersLoading}
+          practitionerChoice={practitionerChoice}
+          selectPractitioner={(id) => {
+            setPractitionerChoice(id);
+            setLocationId(null);
+            setSlot(null);
+          }}
+          locations={bookingLocations}
+          locationsLoading={locationsLoading}
+          locationId={locationId}
+          selectLocation={(id) => {
+            setLocationId(id);
+            setSlot(null);
+          }}
+          workingDays={workingDays}
+          closedDates={closedDates}
+          date={date}
+          selectDate={(value) => {
+            setDate(value);
+            setSlot(null);
+          }}
+          slots={slots}
+          slotsLoading={slotsLoading}
+          slot={slot}
+          selectSlot={setSlot}
+          form={form}
+          setForm={setForm}
+          errors={errors}
+          submitting={submitting}
+          submit={submit}
+          confirmed={confirmed}
+        />
+      </SiteLayout>
+    );
   }
 
   if (confirmed) {
@@ -202,8 +338,9 @@ function BookingPage() {
               Termini juaj është duke pritur konfirmimin e fizioterapeutit.
             </p>
             <dl className="mt-6 space-y-2 rounded-2xl bg-muted/60 p-4 text-left text-sm">
-              <Row label="Fizioterapeuti" value={`${physio.first_name} ${physio.last_name}`} />
+              <Row label="Profesionisti" value={confirmed.practitionerName} />
               <Row label="Shërbimi" value={confirmed.serviceName} />
+              <Row label="Lokacioni" value={confirmed.locationName} />
               <Row label="Data" value={formatLongDate(confirmed.start)} />
               <Row label="Ora" value={formatTime(confirmed.start)} />
               <Row label="Kohëzgjatja" value={formatDuration(confirmed.duration)} />
@@ -246,7 +383,9 @@ function BookingPage() {
           Rezervo termin te {physio.first_name} {physio.last_name}
         </h1>
 
-        {services.length === 0 ? (
+        {catalogLoading ? (
+          <Skeleton className="mt-8 h-40 rounded-2xl" />
+        ) : services.length === 0 ? (
           <p className="mt-6 rounded-2xl border border-dashed border-border p-8 text-center text-muted-foreground">
             Ky fizioterapeut nuk ka ende shërbime aktive.
           </p>
@@ -270,11 +409,12 @@ function BookingPage() {
                             key={s.id}
                             onClick={() => {
                               setServiceId(s.id);
+                              setPractitionerChoice(null);
                               setLocationId(null);
                               setSlot(null);
                               requestAnimationFrame(() =>
                                 document
-                                  .getElementById("hapi-lokacioni")
+                                  .getElementById("hapi-profesionisti")
                                   ?.scrollIntoView({ behavior: "smooth", block: "start" }),
                               );
                             }}
@@ -313,8 +453,82 @@ function BookingPage() {
             </section>
 
             {service ? (
+              <section id="hapi-profesionisti" className="scroll-mt-24">
+                <h2 className="font-semibold">2. Zgjidh profesionistin</h2>
+                {practitionersLoading ? (
+                  <Skeleton className="mt-3 h-20 rounded-2xl" />
+                ) : practitioners.length ? (
+                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                    {practitioners.length > 1 ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPractitionerChoice("any");
+                          setLocationId(null);
+                          setSlot(null);
+                        }}
+                        className={cn(
+                          "rounded-2xl border p-4 text-left transition-colors",
+                          practitionerChoice === "any"
+                            ? "border-primary bg-primary/5"
+                            : "border-border bg-card hover:bg-muted/60",
+                        )}
+                      >
+                        <span className="block font-semibold">Nuk ka rëndësi cili</span>
+                        <span className="text-sm text-muted-foreground">
+                          Sistemi cakton një profesionist të lirë.
+                        </span>
+                      </button>
+                    ) : null}
+                    {practitioners.map((practitioner) => (
+                      <button
+                        key={practitioner.id}
+                        type="button"
+                        onClick={() => {
+                          setPractitionerChoice(practitioner.id);
+                          setLocationId(null);
+                          setSlot(null);
+                        }}
+                        className={cn(
+                          "flex items-center gap-3 rounded-2xl border p-4 text-left transition-colors",
+                          practitionerChoice === practitioner.id
+                            ? "border-primary bg-primary/5"
+                            : "border-border bg-card hover:bg-muted/60",
+                        )}
+                      >
+                        <span className="h-11 w-11 overflow-hidden rounded-full bg-muted">
+                          {practitioner.photo_url ? (
+                            <img
+                              src={practitioner.photo_url}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                          ) : null}
+                        </span>
+                        <span>
+                          <span className="block font-semibold">
+                            {practitioner.first_name} {practitioner.last_name}
+                          </span>
+                          {practitioner.professional_title ? (
+                            <span className="text-sm text-muted-foreground">
+                              {practitioner.professional_title}
+                            </span>
+                          ) : null}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 rounded-2xl border border-dashed p-6 text-sm text-muted-foreground">
+                    Ky shërbim nuk ka profesionist aktiv.
+                  </p>
+                )}
+              </section>
+            ) : null}
+
+            {service && practitionerChoice ? (
               <section id="hapi-lokacioni" className="scroll-mt-24">
-                <h2 className="font-semibold">2. Zgjidh lokacionin</h2>
+                <h2 className="font-semibold">3. Zgjidh lokacionin</h2>
                 {locationsLoading ? (
                   <Skeleton className="mt-3 h-20 rounded-2xl" />
                 ) : bookingLocations.length ? (
@@ -356,7 +570,7 @@ function BookingPage() {
 
             {service && bookingLocation ? (
               <section id="hapi-kalendari" className="scroll-mt-24">
-                <h2 className="font-semibold">3. Zgjidh datën</h2>
+                <h2 className="font-semibold">4. Zgjidh datën</h2>
                 <div className="mt-3">
                   <BookingCalendar
                     value={date}
@@ -456,6 +670,21 @@ function BookingPage() {
 
                   <div className="rounded-2xl bg-muted/60 p-4 text-sm">
                     <Row label="Shërbimi" value={service.name} />
+                    <Row
+                      label="Profesionisti"
+                      value={
+                        practitionerChoice === "any"
+                          ? "Profesionisti i parë i lirë"
+                          : (() => {
+                              const selected = practitioners.find(
+                                (item) => item.id === practitionerChoice,
+                              );
+                              return selected
+                                ? `${selected.first_name} ${selected.last_name}`
+                                : "—";
+                            })()
+                      }
+                    />
                     {bookingLocation ? (
                       <Row label="Lokacioni" value={bookingLocation.name} />
                     ) : null}

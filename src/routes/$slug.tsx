@@ -1,5 +1,5 @@
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { BadgeCheck, GraduationCap, MapPin, Award, Briefcase, Clock, Star } from "lucide-react";
 import { SiteLayout } from "@/components/site/SiteLayout";
@@ -8,7 +8,13 @@ import { StarRating } from "@/components/site/StarRating";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { fetchPhysioBySlug, fetchReviews, fetchGallery } from "@/lib/queries";
+import {
+  fetchGallery,
+  fetchPhysioBySlug,
+  fetchPublicClinicPractitioners,
+  fetchPublicPhysioSchedule,
+  fetchReviews,
+} from "@/lib/queries";
 import { formatDate, formatDuration, formatPrice, DAYS_SQ } from "@/lib/format";
 import { serviceIcon } from "@/lib/service-icons";
 import { fetchClinicBySlug, type ClinicProfile } from "@/lib/clinics";
@@ -25,7 +31,10 @@ export const Route = createFileRoute("/$slug")({
   head: ({ loaderData }) => {
     if (!loaderData) {
       return {
-        meta: [{ title: "Profili nuk u gjet | PhysioPlus" }, { name: "robots", content: "noindex" }],
+        meta: [
+          { title: "Profili nuk u gjet | PhysioPlus" },
+          { name: "robots", content: "noindex" },
+        ],
       };
     }
     if (loaderData.kind === "clinic") {
@@ -145,7 +154,11 @@ function ProfileNotFound() {
   );
 }
 
-function ProfilePage({ physio }: { physio: NonNullable<Awaited<ReturnType<typeof fetchPhysioBySlug>>> }) {
+function ProfilePage({
+  physio,
+}: {
+  physio: NonNullable<Awaited<ReturnType<typeof fetchPhysioBySlug>>>;
+}) {
   const { data: reviews, isLoading: reviewsLoading } = useQuery({
     queryKey: ["reviews", physio.id],
     queryFn: () => fetchReviews(physio.id),
@@ -153,6 +166,15 @@ function ProfilePage({ physio }: { physio: NonNullable<Awaited<ReturnType<typeof
   const { data: gallery } = useQuery({
     queryKey: ["gallery", "PHYSIOTHERAPIST", physio.id],
     queryFn: () => fetchGallery("PHYSIOTHERAPIST", physio.id),
+  });
+  const { data: publicSchedule = [] } = useQuery({
+    queryKey: ["public-physio-schedule", physio.id],
+    queryFn: () => fetchPublicPhysioSchedule(physio.id),
+  });
+  const { data: clinicPractitioners = [] } = useQuery({
+    queryKey: ["public-clinic-practitioners", physio.clinic_id],
+    queryFn: () => fetchPublicClinicPractitioners(physio.clinic_id as string),
+    enabled: Boolean(physio.clinic_id),
   });
   const [lightbox, setLightbox] = useState<string | null>(null);
 
@@ -164,9 +186,15 @@ function ProfilePage({ physio }: { physio: NonNullable<Awaited<ReturnType<typeof
   const specs = (physio.specializations ?? [])
     .map((s) => s.specializations?.name)
     .filter(Boolean) as string[];
-  const hours = [...(physio.working_hours ?? [])]
-    .filter((h) => h.active)
-    .sort((a, b) => ((a.day_of_week + 6) % 7) - ((b.day_of_week + 6) % 7));
+  const scheduleLocations = useMemo(() => {
+    const grouped = new Map<string, { name: string; rows: typeof publicSchedule }>();
+    for (const row of publicSchedule) {
+      const current = grouped.get(row.location_id) ?? { name: row.location_name, rows: [] };
+      current.rows.push(row);
+      grouped.set(row.location_id, current);
+    }
+    return [...grouped.entries()].map(([id, value]) => ({ id, ...value }));
+  }, [publicSchedule]);
 
   return (
     <SiteLayout>
@@ -201,7 +229,11 @@ function ProfilePage({ physio }: { physio: NonNullable<Awaited<ReturnType<typeof
                 {physio.professional_title ?? "Fizioterapeut"}
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-4">
-                <StarRating value={Number(physio.rating_avg)} count={physio.rating_count} size="md" />
+                <StarRating
+                  value={Number(physio.rating_avg)}
+                  count={physio.rating_count}
+                  size="md"
+                />
                 <span className="flex items-center gap-1 text-sm text-muted-foreground">
                   <MapPin className="h-4 w-4" />
                   {physio.city?.name ?? "—"}
@@ -222,6 +254,49 @@ function ProfilePage({ physio }: { physio: NonNullable<Awaited<ReturnType<typeof
           </div>
         </header>
 
+        {clinicPractitioners.length > 1 ? (
+          <section className="mt-8 rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
+            <div className="max-w-2xl">
+              <h2 className="text-xl font-bold">Ekipi i klinikës</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Zgjidh profesionistin gjatë rezervimit ose lëre sistemin të gjejë cilindo që është i
+                lirë.
+              </p>
+            </div>
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {clinicPractitioners.map((member) => (
+                <div key={member.id} className="flex items-center gap-3 rounded-2xl border p-4">
+                  {member.photo_url ? (
+                    <img
+                      src={member.photo_url}
+                      alt={`Foto e ${member.first_name} ${member.last_name}`}
+                      className="h-14 w-14 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div className="flex h-14 w-14 items-center justify-center rounded-full bg-secondary font-bold">
+                      {member.first_name?.[0]}
+                      {member.last_name?.[0]}
+                    </div>
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate font-semibold">
+                      {member.first_name} {member.last_name}
+                    </p>
+                    <p className="truncate text-sm text-muted-foreground">
+                      {member.professional_title ?? "Fizioterapeut"}
+                    </p>
+                    {member.is_clinic_admin ? (
+                      <Badge variant="outline" className="mt-1">
+                        Drejtues i klinikës
+                      </Badge>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
         {gallery && gallery.length ? (
           <section className="mt-8">
             <h2 className="text-xl font-bold">Galeria</h2>
@@ -237,94 +312,101 @@ function ProfilePage({ physio }: { physio: NonNullable<Awaited<ReturnType<typeof
 
         <div className="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_320px]">
           <div className="min-w-0">
-        {physio.bio || physio.education || physio.experience || physio.certifications ? (
-          <section className="mt-8 rounded-3xl border border-border bg-card p-6 shadow-card">
-            <h2 className="text-xl font-bold">Rreth meje</h2>
-            {physio.bio ? <p className="mt-3 whitespace-pre-line text-muted-foreground">{physio.bio}</p> : null}
-            <div className="mt-5 grid gap-4 sm:grid-cols-3">
-              {physio.experience ? (
-                <InfoBlock icon={Briefcase} title="Përvoja" text={physio.experience} />
-              ) : null}
-              {physio.education ? (
-                <InfoBlock icon={GraduationCap} title="Arsimi" text={physio.education} />
-              ) : null}
-              {physio.certifications ? (
-                <InfoBlock icon={Award} title="Certifikimet" text={physio.certifications} />
-              ) : null}
-            </div>
-          </section>
-        ) : null}
+            {physio.bio || physio.education || physio.experience || physio.certifications ? (
+              <section className="mt-8 rounded-3xl border border-border bg-card p-6 shadow-card">
+                <h2 className="text-xl font-bold">Rreth meje</h2>
+                {physio.bio ? (
+                  <p className="mt-3 whitespace-pre-line text-muted-foreground">{physio.bio}</p>
+                ) : null}
+                <div className="mt-5 grid gap-4 sm:grid-cols-3">
+                  {physio.experience ? (
+                    <InfoBlock icon={Briefcase} title="Përvoja" text={physio.experience} />
+                  ) : null}
+                  {physio.education ? (
+                    <InfoBlock icon={GraduationCap} title="Arsimi" text={physio.education} />
+                  ) : null}
+                  {physio.certifications ? (
+                    <InfoBlock icon={Award} title="Certifikimet" text={physio.certifications} />
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
 
-        {specs.length ? (
-          <section className="mt-8">
-            <h2 className="text-xl font-bold">Specializimet</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {specs.map((s) => (
-                <Badge key={s} variant="secondary" className="px-3 py-1 text-sm font-normal">
-                  {s}
-                </Badge>
-              ))}
-            </div>
-          </section>
-        ) : null}
+            {specs.length ? (
+              <section className="mt-8">
+                <h2 className="text-xl font-bold">Specializimet</h2>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {specs.map((s) => (
+                    <Badge key={s} variant="secondary" className="px-3 py-1 text-sm font-normal">
+                      {s}
+                    </Badge>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
-        <section className="mt-8">
-          <h2 className="text-xl font-bold">Shërbimet</h2>
-          {services.length === 0 ? (
-            <p className="mt-3 text-muted-foreground">Ende nuk ka shërbime të publikuara.</p>
-          ) : (
-            <div className="mt-4 space-y-6">
-              {categories.map((cat) => {
-                const items = services.filter((s) => s.category_id === cat.id);
-                if (!items.length) return null;
-                return (
-                  <div key={cat.id}>
-                    <h3 className="font-semibold">{cat.name}</h3>
-                    {cat.description ? (
-                      <p className="text-sm text-muted-foreground">{cat.description}</p>
-                    ) : null}
-                    <div className="mt-3 space-y-3">
-                      {items.map((s) => (
-                        <ServiceRow key={s.id} service={s} slug={physio.slug} />
-                      ))}
+            <section className="mt-8">
+              <h2 className="text-xl font-bold">Shërbimet</h2>
+              {services.length === 0 ? (
+                <p className="mt-3 text-muted-foreground">Ende nuk ka shërbime të publikuara.</p>
+              ) : (
+                <div className="mt-4 space-y-6">
+                  {categories.map((cat) => {
+                    const items = services.filter((s) => s.category_id === cat.id);
+                    if (!items.length) return null;
+                    return (
+                      <div key={cat.id}>
+                        <h3 className="font-semibold">{cat.name}</h3>
+                        {cat.description ? (
+                          <p className="text-sm text-muted-foreground">{cat.description}</p>
+                        ) : null}
+                        <div className="mt-3 space-y-3">
+                          {items.map((s) => (
+                            <ServiceRow key={s.id} service={s} slug={physio.slug} />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {uncategorised.length ? (
+                    <div>
+                      <h3 className="font-semibold">Të tjera</h3>
+                      <div className="mt-3 space-y-3">
+                        {uncategorised.map((s) => (
+                          <ServiceRow key={s.id} service={s} slug={physio.slug} />
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-              {uncategorised.length ? (
-                <div>
-                  <h3 className="font-semibold">Të tjera</h3>
-                  <div className="mt-3 space-y-3">
-                    {uncategorised.map((s) => (
-                      <ServiceRow key={s.id} service={s} slug={physio.slug} />
-                    ))}
-                  </div>
+                  ) : null}
                 </div>
-              ) : null}
-            </div>
-          )}
-        </section>
+              )}
+            </section>
 
-        <section className="mt-8">
-          <h2 className="text-xl font-bold">Vlerësimet</h2>
-          {reviewsLoading ? (
-            <Skeleton className="mt-3 h-24 rounded-2xl" />
-          ) : reviews && reviews.length ? (
-            <div className="mt-3 space-y-3">
-              {reviews.map((r) => (
-                <div key={r.id} className="rounded-2xl border border-border bg-card p-4 shadow-card">
-                  <div className="flex items-center justify-between">
-                    <StarRating value={r.rating} />
-                    <span className="text-xs text-muted-foreground">{formatDate(r.created_at)}</span>
-                  </div>
-                  {r.comment ? <p className="mt-2 text-sm">{r.comment}</p> : null}
+            <section className="mt-8">
+              <h2 className="text-xl font-bold">Vlerësimet</h2>
+              {reviewsLoading ? (
+                <Skeleton className="mt-3 h-24 rounded-2xl" />
+              ) : reviews && reviews.length ? (
+                <div className="mt-3 space-y-3">
+                  {reviews.map((r) => (
+                    <div
+                      key={r.id}
+                      className="rounded-2xl border border-border bg-card p-4 shadow-card"
+                    >
+                      <div className="flex items-center justify-between">
+                        <StarRating value={r.rating} />
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(r.created_at)}
+                        </span>
+                      </div>
+                      {r.comment ? <p className="mt-2 text-sm">{r.comment}</p> : null}
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          ) : (
-            <p className="mt-3 text-muted-foreground">Ende nuk ka vlerësime për këtë profil.</p>
-          )}
-        </section>
+              ) : (
+                <p className="mt-3 text-muted-foreground">Ende nuk ka vlerësime për këtë profil.</p>
+              )}
+            </section>
           </div>
 
           <aside className="space-y-6 lg:sticky lg:top-24">
@@ -346,21 +428,37 @@ function ProfilePage({ physio }: { physio: NonNullable<Awaited<ReturnType<typeof
               <p className="flex items-center gap-2 font-semibold">
                 <Clock className="h-4 w-4 text-primary" /> Disponueshmëria
               </p>
-              <div className="mt-3 divide-y divide-border">
-                {DAYS_SQ.map((day, idx) => {
-                  const h = hours.find((x) => x.day_of_week === idx);
-                  return (
-                    <div key={day} className="flex items-center justify-between gap-2 py-2 text-sm">
-                      <span className="font-medium">{day}</span>
-                      <span className="text-right text-muted-foreground">
-                        {h
-                          ? `${h.start_time.slice(0, 5)} – ${h.end_time.slice(0, 5)}`
-                          : "Mbyllur"}
-                      </span>
+              {scheduleLocations.length ? (
+                <div className="mt-3 space-y-4">
+                  {scheduleLocations.map((location) => (
+                    <div key={location.id}>
+                      {scheduleLocations.length > 1 ? (
+                        <p className="text-sm font-semibold text-primary">{location.name}</p>
+                      ) : null}
+                      <div className="divide-y divide-border">
+                        {DAYS_SQ.map((day, idx) => {
+                          const hours = location.rows.find((row) => row.day_of_week === idx);
+                          return (
+                            <div
+                              key={day}
+                              className="flex items-center justify-between gap-2 py-2 text-sm"
+                            >
+                              <span className="font-medium">{day}</span>
+                              <span className="text-right text-muted-foreground">
+                                {hours
+                                  ? `${hours.start_time.slice(0, 5)} – ${hours.end_time.slice(0, 5)}`
+                                  : "Mbyllur"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm text-muted-foreground">Orari ende nuk është caktuar.</p>
+              )}
             </div>
 
             {physio.address ? (
@@ -384,7 +482,11 @@ function ProfilePage({ physio }: { physio: NonNullable<Awaited<ReturnType<typeof
           onClick={() => setLightbox(null)}
           role="presentation"
         >
-          <img src={lightbox} alt="" className="max-h-[85vh] max-w-full rounded-2xl object-contain" />
+          <img
+            src={lightbox}
+            alt=""
+            className="max-h-[85vh] max-w-full rounded-2xl object-contain"
+          />
         </div>
       ) : null}
 

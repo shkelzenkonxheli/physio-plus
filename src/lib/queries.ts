@@ -1,5 +1,40 @@
 import { supabase } from "@/integrations/supabase/client";
 
+const untypedDb = supabase as unknown as {
+  // Generated database types are refreshed only after production migrations.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rpc: (name: string, args: Record<string, unknown>) => Promise<{ data: any; error: Error | null }>;
+};
+
+export type ClinicBookingCatalogRow = {
+  category_id: string | null;
+  category_name: string | null;
+  category_sort_order: number | null;
+  service_id: string;
+  service_name: string;
+  description: string | null;
+  duration_minutes: number;
+  price: number;
+  currency: string;
+};
+export type PublicPractitioner = {
+  id: string;
+  first_name: string;
+  last_name: string;
+  professional_title: string | null;
+  photo_url: string | null;
+};
+export type PublicBookingLocation = {
+  id: string;
+  name: string;
+  address: string | null;
+  timezone: string;
+  is_default: boolean;
+};
+export type PublicClinicPractitioner = PublicPractitioner & {
+  is_clinic_admin: boolean;
+};
+
 export type PhysioListItem = {
   id: string;
   slug: string;
@@ -57,7 +92,11 @@ export async function fetchSpecializations() {
 }
 
 export async function fetchPhysiotherapists(filters: DirectoryFilters = {}) {
-  let query = supabase.from("physiotherapists").select(LIST_SELECT).eq("status", "APPROVED");
+  let query = supabase
+    .from("physiotherapists")
+    .select(LIST_SELECT)
+    .eq("status", "APPROVED")
+    .eq("directory_listing_enabled", true);
 
   if (filters.q) {
     const term = filters.q.replace(/[,%()]/g, " ").trim();
@@ -134,20 +173,93 @@ export async function fetchPhysioBySlug(slug: string) {
   const { data, error } = await supabase
     .from("physiotherapists")
     .select(
-      `id, slug, first_name, last_name, professional_title, bio, education, experience,
+      `id, clinic_id, slug, first_name, last_name, professional_title, bio, education, experience,
        certifications, photo_url, address, status, verification, rating_avg, rating_count,
        min_cancellation_hours,
        city:cities(name, slug), region:regions(name, slug),
        specializations:physiotherapist_specializations(specializations(name, slug)),
        service_categories(id, name, description, sort_order, active),
-       services(id, name, description, price, currency, duration_minutes, category_id, active),
-       working_hours(day_of_week, start_time, end_time, break_start, break_end, active)`,
+       services(id, name, description, price, currency, duration_minutes, category_id, active)`,
     )
     .eq("slug", slug)
     .eq("status", "APPROVED")
+    .eq("directory_listing_enabled", true)
     .maybeSingle();
   if (error) throw error;
   return data;
+}
+
+export async function fetchPublicClinicPractitioners(clinicId: string) {
+  const { data, error } = await untypedDb.rpc("public_clinic_practitioners", {
+    _clinic_id: clinicId,
+  });
+  if (error) throw error;
+  return (data ?? []) as PublicClinicPractitioner[];
+}
+
+export async function fetchClinicBookingCatalog(clinicId: string) {
+  const { data, error } = await untypedDb.rpc("public_clinic_booking_catalog", {
+    _clinic_id: clinicId,
+  });
+  if (error) throw error;
+  return (data ?? []) as ClinicBookingCatalogRow[];
+}
+
+export async function fetchServicePractitioners(clinicId: string, clinicServiceId: string) {
+  const { data, error } = await untypedDb.rpc("public_service_practitioners", {
+    _clinic_id: clinicId,
+    _clinic_service_id: clinicServiceId,
+  });
+  if (error) throw error;
+  return (data ?? []) as PublicPractitioner[];
+}
+
+export async function fetchServiceLocations(
+  clinicId: string,
+  clinicServiceId: string,
+  physioId: string | null,
+) {
+  const { data, error } = await untypedDb.rpc("public_service_locations", {
+    _clinic_id: clinicId,
+    _clinic_service_id: clinicServiceId,
+    _physio_id: physioId,
+  });
+  if (error) throw error;
+  return (data ?? []) as PublicBookingLocation[];
+}
+
+export async function fetchClinicServiceSlots(
+  clinicId: string,
+  locationId: string,
+  clinicServiceId: string,
+  date: string,
+  physioId: string | null,
+): Promise<string[]> {
+  const { data, error } = await untypedDb.rpc("clinic_service_available_slots", {
+    _clinic_id: clinicId,
+    _location_id: locationId,
+    _clinic_service_id: clinicServiceId,
+    _date: date,
+    _physio_id: physioId,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<{ slot: string }>).map((row) => row.slot);
+}
+
+export async function fetchClinicServiceWorkingDays(
+  clinicId: string,
+  locationId: string,
+  clinicServiceId: string,
+  physioId: string | null,
+): Promise<number[]> {
+  const { data, error } = await untypedDb.rpc("clinic_service_working_days", {
+    _clinic_id: clinicId,
+    _location_id: locationId,
+    _clinic_service_id: clinicServiceId,
+    _physio_id: physioId,
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<{ day_of_week: number }>).map((row) => row.day_of_week);
 }
 
 export async function fetchReviews(physioId: string) {
@@ -200,4 +312,49 @@ export async function fetchAvailableSlots(
   });
   if (error) throw error;
   return (data ?? []).map((r: { slot: string }) => r.slot);
+}
+
+export async function fetchBookingWorkingDays(
+  clinicId: string,
+  locationId: string,
+  physioId: string,
+  serviceId: string,
+) {
+  const client = supabase as unknown as {
+    rpc: (
+      name: string,
+      args: Record<string, string>,
+    ) => Promise<{ data: Array<{ day_of_week: number }> | null; error: Error | null }>;
+  };
+  const { data, error } = await client.rpc("booking_working_days", {
+    _clinic_id: clinicId,
+    _location_id: locationId,
+    _physio_id: physioId,
+    _service_id: serviceId,
+  });
+  if (error) throw error;
+  return (data ?? []).map((row) => row.day_of_week);
+}
+
+export async function fetchPublicPhysioSchedule(physioId: string) {
+  const client = supabase as unknown as {
+    rpc: (
+      name: string,
+      args: Record<string, string>,
+    ) => Promise<{
+      data: Array<{
+        location_id: string;
+        location_name: string;
+        day_of_week: number;
+        start_time: string;
+        end_time: string;
+      }> | null;
+      error: Error | null;
+    }>;
+  };
+  const { data, error } = await client.rpc("public_physio_schedule", {
+    _physio_id: physioId,
+  });
+  if (error) throw error;
+  return data ?? [];
 }

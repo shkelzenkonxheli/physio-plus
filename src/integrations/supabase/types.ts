@@ -598,6 +598,7 @@ export type Database = {
           city_id: string | null
           clinic_id: string | null
           created_at: string
+          directory_listing_enabled: boolean
           education: string | null
           experience: string | null
           first_name: string
@@ -629,6 +630,7 @@ export type Database = {
           city_id?: string | null
           clinic_id?: string | null
           created_at?: string
+          directory_listing_enabled?: boolean
           education?: string | null
           experience?: string | null
           first_name?: string
@@ -660,6 +662,7 @@ export type Database = {
           city_id?: string | null
           clinic_id?: string | null
           created_at?: string
+          directory_listing_enabled?: boolean
           education?: string | null
           experience?: string | null
           first_name?: string

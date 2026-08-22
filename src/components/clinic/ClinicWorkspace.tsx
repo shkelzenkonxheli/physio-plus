@@ -62,6 +62,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ClinicContentManager } from "@/components/admin/ClinicContentManager";
+import { ProfileTab } from "@/components/panel/ProfileTab";
+import { GalleryManager } from "@/components/panel/GalleryManager";
 import {
   Dialog,
   DialogContent,
@@ -80,6 +82,7 @@ type View =
   | "services"
   | "locations"
   | "availability"
+  | "professional-profile"
   | "notifications"
   | "website"
   | "reports"
@@ -132,6 +135,11 @@ type ClinicInvitation = {
   accepted_at: string | null;
   revoked_at: string | null;
 };
+type BookableAssignment = {
+  physiotherapist_id: string;
+  location_id: string;
+  clinic_service_id: string;
+};
 type Location = {
   id: string;
   clinic_id: string;
@@ -140,6 +148,7 @@ type Location = {
   phone: string | null;
   active: boolean;
   is_default: boolean;
+  timezone: string;
 };
 type Physio = {
   id: string;
@@ -257,7 +266,12 @@ const NAV: Array<{
     icon: CalendarDays,
     roles: ["CLINIC_ADMIN", "SUPER_ADMIN", "PHYSIOTHERAPIST"],
   },
-  { id: "notifications", label: "Njoftimet", icon: Bell },
+  {
+    id: "professional-profile",
+    label: "Profili profesional",
+    icon: UserRound,
+    roles: ["CLINIC_ADMIN", "SUPER_ADMIN", "PHYSIOTHERAPIST"],
+  },
   { id: "website", label: "Website", icon: Globe2, roles: ["CLINIC_ADMIN", "SUPER_ADMIN"] },
   {
     id: "reports",
@@ -273,7 +287,9 @@ const NAV: Array<{
   },
   { id: "settings", label: "Cilësimet", icon: Settings, roles: ["CLINIC_ADMIN", "SUPER_ADMIN"] },
 ];
-const VIEW_IDS = new Set<View>(NAV.map((item) => item.id));
+// Notifications are opened from the bell in the top bar, so they remain a
+// valid workspace view without taking a second slot in the sidebar.
+const VIEW_IDS = new Set<View>([...NAV.map((item) => item.id), "notifications"]);
 
 const TITLES: Record<View, string> = {
   dashboard: "Përmbledhja e klinikës",
@@ -284,6 +300,7 @@ const TITLES: Record<View, string> = {
   services: "Shërbimet",
   locations: "Lokacionet",
   availability: "Orari & disponueshmëria",
+  "professional-profile": "Profili profesional",
   notifications: "Njoftimet",
   website: "Website",
   reports: "Raportet",
@@ -379,6 +396,8 @@ export function ClinicWorkspace() {
   const [collapsed, setCollapsed] = useState(false);
   const [search, setSearch] = useState("");
   const [updatingAppointmentId, setUpdatingAppointmentId] = useState<string | null>(null);
+  const [newAppointmentRequest, setNewAppointmentRequest] = useState(0);
+  const [newPatientRequest, setNewPatientRequest] = useState(0);
 
   useEffect(() => {
     if (!authLoading && !user) void navigate({ to: "/hyr", replace: true });
@@ -393,7 +412,11 @@ export function ClinicWorkspace() {
     return () => window.removeEventListener("popstate", syncView);
   }, []);
 
-  const { data: memberships = [], isLoading: membershipsLoading } = useQuery<Membership[]>({
+  const {
+    data: memberships = [],
+    isLoading: membershipsLoading,
+    error: membershipsError,
+  } = useQuery<Membership[]>({
     queryKey: ["clinic-workspace-memberships", user?.id],
     enabled: Boolean(user),
     queryFn: async () => {
@@ -407,7 +430,11 @@ export function ClinicWorkspace() {
     },
   });
 
-  const { data: clinics = [], isLoading: clinicsLoading } = useQuery<Clinic[]>({
+  const {
+    data: clinics = [],
+    isLoading: clinicsLoading,
+    error: clinicsError,
+  } = useQuery<Clinic[]>({
     queryKey: ["clinic-workspace-clinics", memberships.map((m) => m.clinic_id), isAdmin],
     enabled: Boolean(user) && (isAdmin || memberships.length > 0),
     queryFn: async () => {
@@ -440,20 +467,28 @@ export function ClinicWorkspace() {
       : (membership?.role ?? "PHYSIOTHERAPIST");
   const canManage = role === "CLINIC_ADMIN" || role === "SUPER_ADMIN";
 
-  const { data: locations = [] } = useQuery<Location[]>({
+  const {
+    data: locations = [],
+    isLoading: locationsLoading,
+    error: locationsError,
+  } = useQuery<Location[]>({
     queryKey: ["clinic-workspace-locations", clinicId],
     enabled: Boolean(clinicId),
     queryFn: async () => {
       const { data, error } = await db
         .from("clinic_locations")
-        .select("id,clinic_id,name,address,phone,active,is_default")
+        .select("id,clinic_id,name,address,phone,active,is_default,timezone")
         .eq("clinic_id", clinicId)
         .order("is_default", { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
   });
-  const { data: team = [] } = useQuery<Physio[]>({
+  const {
+    data: team = [],
+    isLoading: teamLoading,
+    error: teamError,
+  } = useQuery<Physio[]>({
     queryKey: ["clinic-workspace-team", clinicId],
     enabled: Boolean(clinicId),
     queryFn: async () => {
@@ -466,7 +501,11 @@ export function ClinicWorkspace() {
       return data ?? [];
     },
   });
-  const { data: appointments = [], isLoading: appointmentsLoading } = useQuery<Appointment[]>({
+  const {
+    data: appointments = [],
+    isLoading: appointmentsLoading,
+    error: appointmentsError,
+  } = useQuery<Appointment[]>({
     queryKey: ["clinic-workspace-appointments", clinicId, team.map((p) => p.id)],
     enabled: team.length > 0,
     queryFn: async () => {
@@ -484,7 +523,11 @@ export function ClinicWorkspace() {
       return data ?? [];
     },
   });
-  const { data: services = [] } = useQuery<ClinicService[]>({
+  const {
+    data: services = [],
+    isLoading: servicesLoading,
+    error: servicesError,
+  } = useQuery<ClinicService[]>({
     queryKey: ["clinic-workspace-services", clinicId],
     enabled: Boolean(clinicId),
     queryFn: async () => {
@@ -497,7 +540,22 @@ export function ClinicWorkspace() {
       return data ?? [];
     },
   });
-  const { data: notifications = [] } = useQuery<Notification[]>({
+  const {
+    data: bookableAssignments = [],
+    isLoading: bookableAssignmentsLoading,
+    error: bookableAssignmentsError,
+  } = useQuery<BookableAssignment[]>({
+    queryKey: ["clinic-bookable-assignments", clinicId],
+    enabled: Boolean(clinicId),
+    queryFn: async () => {
+      const { data, error } = await db.rpc("get_clinic_bookable_assignments", {
+        _clinic_id: clinicId,
+      });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const { data: notifications = [], error: notificationsError } = useQuery<Notification[]>({
     queryKey: ["clinic-workspace-notifications", user?.id],
     enabled: Boolean(user),
     queryFn: async () => {
@@ -511,7 +569,11 @@ export function ClinicWorkspace() {
       return data ?? [];
     },
   });
-  const { data: patients = [] } = useQuery<ClinicPatient[]>({
+  const {
+    data: patients = [],
+    isLoading: patientsLoading,
+    error: patientsError,
+  } = useQuery<ClinicPatient[]>({
     queryKey: ["clinic-workspace-patients", clinicId],
     enabled: Boolean(clinicId),
     queryFn: async () => {
@@ -526,7 +588,7 @@ export function ClinicWorkspace() {
       return data ?? [];
     },
   });
-  const { data: sessionNotes = [] } = useQuery<SessionNote[]>({
+  const { data: sessionNotes = [], error: sessionNotesError } = useQuery<SessionNote[]>({
     queryKey: ["clinic-workspace-session-notes", clinicId],
     enabled: Boolean(clinicId) && role !== "RECEPTIONIST",
     queryFn: async () => {
@@ -541,7 +603,7 @@ export function ClinicWorkspace() {
       return data ?? [];
     },
   });
-  const { data: subscription = null } = useQuery<Subscription | null>({
+  const { data: subscription = null, error: subscriptionError } = useQuery<Subscription | null>({
     queryKey: ["clinic-workspace-subscription", user?.id],
     enabled: Boolean(user),
     queryFn: async () => {
@@ -557,13 +619,43 @@ export function ClinicWorkspace() {
     },
   });
 
-  const visibleNav = NAV.filter((item) => !item.roles || item.roles.includes(role));
+  const workspaceLoading =
+    Boolean(clinicId) &&
+    (locationsLoading ||
+      teamLoading ||
+      appointmentsLoading ||
+      servicesLoading ||
+      patientsLoading ||
+      bookableAssignmentsLoading);
+  const workspaceError = [
+    locationsError,
+    teamError,
+    appointmentsError,
+    servicesError,
+    notificationsError,
+    patientsError,
+    sessionNotesError,
+    subscriptionError,
+    bookableAssignmentsError,
+  ].find(Boolean);
+
   const todayKey = new Date().toDateString();
-  const today = appointments.filter((item) => new Date(item.start_at).toDateString() === todayKey);
-  const upcoming = appointments
+  const scopedAppointments = appointments.filter(
+    (item) => locationId === "all" || item.location_id === locationId,
+  );
+  const today = scopedAppointments.filter(
+    (item) => new Date(item.start_at).toDateString() === todayKey,
+  );
+  const upcoming = scopedAppointments
     .filter((item) => new Date(item.start_at) >= new Date())
     .slice(0, 20);
   const physioById = new Map(team.map((item) => [item.id, item]));
+  const currentPhysioId = team.find((member) => member.user_id === user?.id)?.id ?? null;
+  const visibleNav = NAV.filter(
+    (item) =>
+      (!item.roles || item.roles.includes(role)) &&
+      (item.id !== "professional-profile" || Boolean(currentPhysioId)),
+  );
 
   async function logout() {
     await queryClient.cancelQueries();
@@ -580,12 +672,20 @@ export function ClinicWorkspace() {
     );
     setMobileOpen(false);
   }
-  function unsupported(message: string) {
-    toast.info(message);
+  function openNewAppointment() {
+    chooseView("appointments");
+    setNewAppointmentRequest((value) => value + 1);
+  }
+  function openNewPatient() {
+    chooseView("patients");
+    setNewPatientRequest((value) => value + 1);
   }
   async function setAppointmentStatus(id: string, status: AppointmentStatus) {
     setUpdatingAppointmentId(id);
-    const { error } = await db.from("appointments").update({ status }).eq("id", id);
+    const { error } = await db.rpc("set_clinic_appointment_status", {
+      _appointment_id: id,
+      _status: status,
+    });
     setUpdatingAppointmentId(null);
 
     if (error) {
@@ -658,6 +758,23 @@ export function ClinicWorkspace() {
   }
   if (!user) return null;
 
+  if (membershipsError || clinicsError) {
+    const error = membershipsError || clinicsError;
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
+        <div
+          role="alert"
+          className="max-w-lg rounded-xl border border-red-200 bg-red-50 p-6 text-red-800"
+        >
+          <h1 className="font-semibold">Klinika nuk mund të ngarkohet.</h1>
+          <p className="mt-2 text-sm">
+            {error instanceof Error ? error.message : "Gabim i databazës."}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (!clinic) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50 p-6">
@@ -693,14 +810,14 @@ export function ClinicWorkspace() {
           </div>
         ) : null}
       </div>
-      <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
+      <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-2">
         {visibleNav.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             type="button"
             onClick={() => chooseView(id)}
             className={cn(
-              "flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm transition",
+              "flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-[13px] transition",
               view === id
                 ? "bg-white/10 font-medium text-white"
                 : "text-slate-400 hover:bg-white/5 hover:text-white",
@@ -716,27 +833,18 @@ export function ClinicWorkspace() {
       <div className="space-y-1 border-t border-white/10 p-2">
         <button
           className={cn(
-            "flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-400 hover:bg-white/5 hover:text-white",
+            "flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-[13px] text-slate-400 hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-40",
             collapsed && "justify-center px-0",
           )}
-          onClick={() => void navigate({ to: "/profili-profesional" })}
-        >
-          <UserRound className="h-4 w-4" />
-          {!collapsed ? "Profili profesional" : null}
-        </button>
-        <button
-          className={cn(
-            "flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-400 hover:bg-white/5 hover:text-white",
-            collapsed && "justify-center px-0",
-          )}
-          onClick={() => unsupported("Qendra e ndihmës do të lidhet në një fazë të ardhshme.")}
+          disabled
+          title="Qendra e ndihmës nuk ka backend ende."
         >
           <HelpCircle className="h-4 w-4" />
           {!collapsed ? "Ndihmë" : null}
         </button>
         <button
           className={cn(
-            "flex h-10 w-full items-center gap-3 rounded-lg px-3 text-sm text-slate-400 hover:bg-white/5 hover:text-white",
+            "flex h-9 w-full items-center gap-2.5 rounded-lg px-3 text-[13px] text-slate-400 hover:bg-white/5 hover:text-white",
             collapsed && "justify-center px-0",
           )}
           onClick={() => void logout()}
@@ -824,14 +932,7 @@ export function ClinicWorkspace() {
               ))}
             </select>
           ) : null}
-          <Button
-            size="sm"
-            onClick={() =>
-              unsupported(
-                "Krijimi manual i terminit kërkon API tenant-aware; booking-u ekzistues nuk u ndryshua.",
-              )
-            }
-          >
+          <Button size="sm" onClick={openNewAppointment}>
             <Plus className="h-4 w-4" />
             <span className="hidden sm:inline">Termin i ri</span>
           </Button>
@@ -852,34 +953,61 @@ export function ClinicWorkspace() {
           </button>
         </header>
         <main className="mx-auto max-w-[1500px] p-4 md:p-6">
-          <WorkspaceView
-            view={view}
-            clinic={clinic}
-            role={role}
-            canManage={canManage}
-            memberships={memberships.filter((item) => item.clinic_id === clinicId)}
-            locations={locations}
-            team={team}
-            appointments={appointments}
-            today={today}
-            upcoming={upcoming}
-            services={services}
-            notifications={notifications}
-            patients={patients}
-            sessionNotes={sessionNotes}
-            subscription={subscription}
-            physioById={physioById}
-            loading={appointmentsLoading}
-            search={search}
-            chooseView={chooseView}
-            unsupported={unsupported}
-            setAppointmentStatus={setAppointmentStatus}
-            updatingAppointmentId={updatingAppointmentId}
-            saveClinicHistorySettings={saveClinicHistorySettings}
-            setPatientHistory={setPatientHistory}
-            saveSessionNote={saveSessionNote}
-            markNotificationRead={markNotificationRead}
-          />
+          {workspaceError ? (
+            <div
+              role="alert"
+              className="rounded-xl border border-red-200 bg-red-50 p-5 text-red-800"
+            >
+              <p className="font-semibold">Të dhënat e panelit nuk u ngarkuan.</p>
+              <p className="mt-1 text-sm">
+                {workspaceError instanceof Error
+                  ? workspaceError.message
+                  : "Gabim i panjohur i databazës."}
+              </p>
+            </div>
+          ) : workspaceLoading ? (
+            <div className="space-y-4">
+              <Skeleton className="h-28 w-full rounded-xl" />
+              <Skeleton className="h-80 w-full rounded-xl" />
+            </div>
+          ) : (
+            <WorkspaceView
+              view={view}
+              clinic={clinic}
+              role={role}
+              canManage={canManage}
+              memberships={memberships.filter((item) => item.clinic_id === clinicId)}
+              locations={locations}
+              team={team}
+              appointments={scopedAppointments}
+              today={today}
+              upcoming={upcoming}
+              services={services}
+              bookableAssignments={bookableAssignments}
+              notifications={notifications}
+              patients={patients}
+              sessionNotes={sessionNotes}
+              subscription={subscription}
+              physioById={physioById}
+              loading={appointmentsLoading}
+              search={search}
+              chooseView={chooseView}
+              setAppointmentStatus={setAppointmentStatus}
+              updatingAppointmentId={updatingAppointmentId}
+              saveClinicHistorySettings={saveClinicHistorySettings}
+              setPatientHistory={setPatientHistory}
+              saveSessionNote={saveSessionNote}
+              markNotificationRead={markNotificationRead}
+              openNewAppointment={openNewAppointment}
+              openNewPatient={openNewPatient}
+              newAppointmentRequest={newAppointmentRequest}
+              newPatientRequest={newPatientRequest}
+              canAuthorSessionNote={Boolean(
+                role !== "RECEPTIONIST" && team.some((member) => member.user_id === user.id),
+              )}
+              currentPhysioId={currentPhysioId}
+            />
+          )}
         </main>
       </div>
     </div>
@@ -898,6 +1026,7 @@ function WorkspaceView(props: {
   today: Appointment[];
   upcoming: Appointment[];
   services: ClinicService[];
+  bookableAssignments: BookableAssignment[];
   notifications: Notification[];
   patients: ClinicPatient[];
   sessionNotes: SessionNote[];
@@ -906,7 +1035,6 @@ function WorkspaceView(props: {
   loading: boolean;
   search: string;
   chooseView: (view: View) => void;
-  unsupported: (message: string) => void;
   setAppointmentStatus: (id: string, status: AppointmentStatus) => Promise<void>;
   updatingAppointmentId: string | null;
   saveClinicHistorySettings: (historyEnabled: boolean, notesEnabled: boolean) => Promise<void>;
@@ -917,6 +1045,12 @@ function WorkspaceView(props: {
     values: Pick<SessionNote, "treatment_summary" | "patient_progress" | "next_session_plan">,
   ) => Promise<void>;
   markNotificationRead: (id: string) => Promise<void>;
+  openNewAppointment: () => void;
+  openNewPatient: () => void;
+  newAppointmentRequest: number;
+  newPatientRequest: number;
+  canAuthorSessionNote: boolean;
+  currentPhysioId: string | null;
 }) {
   if (props.view === "dashboard") return <Dashboard {...props} />;
   if (props.view === "calendar") return <CalendarView {...props} />;
@@ -926,6 +1060,19 @@ function WorkspaceView(props: {
   if (props.view === "services") return <ServicesView {...props} />;
   if (props.view === "locations") return <LocationsView {...props} />;
   if (props.view === "availability") return <AvailabilityView {...props} />;
+  if (props.view === "professional-profile") {
+    return props.currentPhysioId ? (
+      <div className="mx-auto max-w-5xl">
+        <ProfileTab physioId={props.currentPhysioId} />
+      </div>
+    ) : (
+      <EmptyState
+        icon={UserRound}
+        title="Profili profesional mungon"
+        body="Ky përdorues nuk ka profil fizioterapeuti në këtë klinikë."
+      />
+    );
+  }
   if (props.view === "notifications") return <NotificationsView {...props} />;
   if (props.view === "website") return <WebsiteView {...props} />;
   if (props.view === "reports") return <ReportsView {...props} />;
@@ -981,15 +1128,13 @@ function Dashboard(props: Parameters<typeof WorkspaceView>[0]) {
         <div className="space-y-6">
           <Section title="Veprime të shpejta">
             <div className="grid grid-cols-2 gap-2">
-              <Quick
-                label="Termin i ri"
-                icon={Plus}
-                onClick={() => props.unsupported("Krijimi manual kërkon API tenant-aware.")}
-              />
+              <Quick label="Termin i ri" icon={Plus} onClick={props.openNewAppointment} />
               <Quick
                 label="Pacient i ri"
                 icon={UserRound}
-                onClick={() => props.unsupported("Tabela patients nuk ekziston ende.")}
+                onClick={props.openNewPatient}
+                disabled={props.role === "PHYSIOTHERAPIST"}
+                title="Pacientët krijohen nga recepsioni ose administratori."
               />
               <Quick
                 label="Kopjo linkun"
@@ -1043,15 +1188,21 @@ function Quick({
   label,
   icon: Icon,
   onClick,
+  disabled = false,
+  title,
 }: {
   label: string;
   icon: ComponentType<{ className?: string }>;
   onClick: () => void;
+  disabled?: boolean;
+  title?: string;
 }) {
   return (
     <button
       onClick={onClick}
-      className="flex min-h-20 flex-col items-start justify-between rounded-lg border p-3 text-left text-sm font-medium hover:bg-slate-50"
+      disabled={disabled}
+      title={disabled ? title : undefined}
+      className="flex min-h-20 flex-col items-start justify-between rounded-lg border p-3 text-left text-sm font-medium hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
     >
       <Icon className="h-4 w-4 text-cyan-700" />
       {label}
@@ -1151,10 +1302,7 @@ function CalendarView(props: Parameters<typeof WorkspaceView>[0]) {
               </option>
             ))}
           </select>
-          <Button
-            size="sm"
-            onClick={() => props.unsupported("Manual booking kërkon API tenant-aware.")}
-          >
+          <Button size="sm" onClick={props.openNewAppointment}>
             <Plus className="h-4 w-4" />
             Termin i ri
           </Button>
@@ -1220,6 +1368,9 @@ function CalendarView(props: Parameters<typeof WorkspaceView>[0]) {
 
 function AppointmentsView(props: Parameters<typeof WorkspaceView>[0]) {
   const [editorAppointment, setEditorAppointment] = useState<Appointment | "new" | null>(null);
+  useEffect(() => {
+    if (props.newAppointmentRequest > 0) setEditorAppointment("new");
+  }, [props.newAppointmentRequest]);
   const [statusFilter, setStatusFilter] = useState("all");
   const [physioFilter, setPhysioFilter] = useState("all");
   const [serviceFilter, setServiceFilter] = useState("all");
@@ -1255,7 +1406,7 @@ function AppointmentsView(props: Parameters<typeof WorkspaceView>[0]) {
   return (
     <Section
       title="Të gjitha terminet"
-      description={`${rows.length} rezultate · Location dhe source nuk ekzistojnë ende në modelin aktual.`}
+      description={`${rows.length} rezultate nga databaza e klinikës.`}
       action={
         <div className="flex gap-2">
           <Badge variant="secondary">
@@ -1508,7 +1659,9 @@ function AppointmentEditor({
     appointment?.location_id ?? props.locations[0]?.id ?? "",
   );
   const [physioId, setPhysioId] = useState(
-    appointment?.physiotherapist_id ?? props.team[0]?.id ?? "",
+    appointment?.physiotherapist_id ??
+      (props.role === "PHYSIOTHERAPIST" ? props.currentPhysioId : props.team[0]?.id) ??
+      "",
   );
   const [serviceId, setServiceId] = useState(
     appointment?.clinic_service_id ?? props.services[0]?.id ?? "",
@@ -1527,12 +1680,45 @@ function AppointmentEditor({
   const [source, setSource] = useState("RECEPTION");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const bookableServiceIds = useMemo(
+    () =>
+      props.bookableAssignments
+        .filter(
+          (assignment) =>
+            assignment.location_id === locationId && assignment.physiotherapist_id === physioId,
+        )
+        .map((assignment) => assignment.clinic_service_id),
+    [locationId, physioId, props.bookableAssignments],
+  );
+  const bookingCombinationSupported = Boolean(
+    locationId && physioId && serviceId && bookableServiceIds.includes(serviceId),
+  );
   useEffect(() => {
     if (!open) return;
     if (!locationId && props.locations[0]) setLocationId(props.locations[0].id);
-    if (!physioId && props.team[0]) setPhysioId(props.team[0].id);
+    if (!physioId) {
+      const defaultPhysio =
+        props.role === "PHYSIOTHERAPIST"
+          ? props.team.find((member) => member.id === props.currentPhysioId)
+          : props.team[0];
+      if (defaultPhysio) setPhysioId(defaultPhysio.id);
+    }
     if (!serviceId && props.services[0]) setServiceId(props.services[0].id);
-  }, [open, locationId, physioId, serviceId, props.locations, props.team, props.services]);
+  }, [
+    open,
+    locationId,
+    physioId,
+    serviceId,
+    props.locations,
+    props.team,
+    props.services,
+    props.currentPhysioId,
+    props.role,
+  ]);
+  useEffect(() => {
+    if (!open || !locationId || !physioId) return;
+    if (!bookableServiceIds.includes(serviceId)) setServiceId(bookableServiceIds[0] ?? "");
+  }, [open, locationId, physioId, serviceId, bookableServiceIds]);
   const { data: slots = [], isLoading } = useQuery<string[]>({
     queryKey: [
       "clinic-operation-slots",
@@ -1543,7 +1729,7 @@ function AppointmentEditor({
       date,
       appointment?.id,
     ],
-    enabled: open && Boolean(locationId && physioId && serviceId && date),
+    enabled: open && bookingCombinationSupported && Boolean(date),
     queryFn: async () => {
       const { data, error } = await db.rpc("clinic_available_slots", {
         _clinic_id: props.clinic.id,
@@ -1560,7 +1746,8 @@ function AppointmentEditor({
   async function save() {
     const selectedStart =
       slot || (date && time ? new Date(`${date}T${time}:00`).toISOString() : "");
-    if (!selectedStart || !locationId || !physioId || !serviceId) return;
+    if (!selectedStart || !locationId || !physioId || !serviceId || !bookingCombinationSupported)
+      return;
     if (!appointment && patientMode === "existing" && !patientId) return;
     if (
       !appointment &&
@@ -1638,13 +1825,15 @@ function AppointmentEditor({
               >
                 Pacient ekzistues
               </Button>
-              <Button
-                type="button"
-                variant={patientMode === "new" ? "default" : "outline"}
-                onClick={() => setPatientMode("new")}
-              >
-                Pacient i ri
-              </Button>
+              {props.role !== "PHYSIOTHERAPIST" ? (
+                <Button
+                  type="button"
+                  variant={patientMode === "new" ? "default" : "outline"}
+                  onClick={() => setPatientMode("new")}
+                >
+                  Pacient i ri
+                </Button>
+              ) : null}
             </div>
           ) : null}
           {!appointment && patientMode === "existing" ? (
@@ -1717,8 +1906,9 @@ function AppointmentEditor({
             {props.services
               .filter((s) => s.active)
               .map((s) => (
-                <option key={s.id} value={s.id}>
+                <option key={s.id} value={s.id} disabled={!bookableServiceIds.includes(s.id)}>
                   {s.name}
+                  {!bookableServiceIds.includes(s.id) ? " (i pacaktuar)" : ""}
                 </option>
               ))}
           </select>
@@ -1731,11 +1921,30 @@ function AppointmentEditor({
             }}
           >
             <option value="">Zgjidh fizioterapeutin</option>
-            {props.team.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.first_name} {p.last_name}
-              </option>
-            ))}
+            {props.team
+              .filter((p) => props.role !== "PHYSIOTHERAPIST" || p.id === props.currentPhysioId)
+              .map((p) => (
+                <option
+                  key={p.id}
+                  value={p.id}
+                  disabled={
+                    !props.bookableAssignments.some(
+                      (assignment) =>
+                        assignment.location_id === locationId &&
+                        assignment.physiotherapist_id === p.id,
+                    )
+                  }
+                >
+                  {p.first_name} {p.last_name}
+                  {!props.bookableAssignments.some(
+                    (assignment) =>
+                      assignment.location_id === locationId &&
+                      assignment.physiotherapist_id === p.id,
+                  )
+                    ? " (nuk është gati për booking)"
+                    : ""}
+                </option>
+              ))}
           </select>
           <Input
             type="date"
@@ -1800,6 +2009,12 @@ function AppointmentEditor({
             fizioterapeutit te Disponueshmëria.
           </p>
         ) : null}
+        {locationId && physioId && !bookingCombinationSupported ? (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Ky fizioterapeut nuk ka ende lokacion, shërbim aktiv dhe mapping legacy të aprovuar për
+            booking. Konfigurimi i terminit është çaktivizuar në mënyrë të sigurt.
+          </p>
+        ) : null}
         {!appointment ? (
           <Textarea
             placeholder="Shënim administrativ opsional"
@@ -1819,6 +2034,7 @@ function AppointmentEditor({
               !locationId ||
               !physioId ||
               !serviceId ||
+              !bookingCombinationSupported ||
               (!appointment && patientMode === "existing" && !patientId) ||
               (!appointment &&
                 patientMode === "new" &&
@@ -1836,6 +2052,7 @@ function AppointmentEditor({
 }
 
 function PatientsView(props: Parameters<typeof WorkspaceView>[0]) {
+  const queryClient = useQueryClient();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [patientEditor, setPatientEditor] = useState<ClinicPatient | "new" | null>(null);
   const [savingPatient, setSavingPatient] = useState(false);
@@ -1846,6 +2063,10 @@ function PatientsView(props: Parameters<typeof WorkspaceView>[0]) {
     next_session_plan: "",
   });
   const [savingNote, setSavingNote] = useState(false);
+  const [updatingPatientId, setUpdatingPatientId] = useState<string | null>(null);
+  useEffect(() => {
+    if (props.newPatientRequest > 0) setPatientEditor("new");
+  }, [props.newPatientRequest]);
   const term = props.search.trim().toLowerCase();
   const patients = props.patients.filter((patient) =>
     `${patient.first_name} ${patient.last_name} ${patient.phone} ${patient.email}`
@@ -1899,69 +2120,117 @@ function PatientsView(props: Parameters<typeof WorkspaceView>[0]) {
     }
   }
 
+  async function togglePatientActive(patient: ClinicPatient) {
+    const nextActive = !patient.active;
+    if (
+      !nextActive &&
+      !window.confirm("Pacienti do të çaktivizohet, por historia dhe terminet nuk do të fshihen.")
+    )
+      return;
+    setUpdatingPatientId(patient.id);
+    const { error } = await db.rpc("set_clinic_patient_active", {
+      _clinic_id: props.clinic.id,
+      _patient_id: patient.id,
+      _active: nextActive,
+    });
+    setUpdatingPatientId(null);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    await queryClient.invalidateQueries({
+      queryKey: ["clinic-workspace-patients", props.clinic.id],
+    });
+    toast.success(nextActive ? "Pacienti u aktivizua." : "Pacienti u çaktivizua.");
+  }
+
   return (
     <Section
       title="Pacientët"
       description="Direktoria reale e pacientëve, e sinkronizuar nga rezervimet e klinikës."
       action={
-        <Button size="sm" onClick={() => setPatientEditor("new")}>
-          <Plus className="h-4 w-4" /> Pacient i ri
-        </Button>
+        ["CLINIC_ADMIN", "RECEPTIONIST", "SUPER_ADMIN"].includes(props.role) ? (
+          <Button size="sm" onClick={() => setPatientEditor("new")}>
+            <Plus className="h-4 w-4" /> Pacient i ri
+          </Button>
+        ) : undefined
       }
     >
       {patients.length ? (
-        <div className="grid gap-3 lg:grid-cols-2">
-          {patients.map((p) => {
-            const appointments = patientAppointments(p);
-            const past = appointments.filter((a) => new Date(a.start_at) < new Date());
-            const next = [...appointments]
-              .filter((a) => new Date(a.start_at) >= new Date())
-              .sort((a, b) => a.start_at.localeCompare(b.start_at))[0];
-            const latest = past[0] ?? appointments[0];
-            return (
-              <button
-                type="button"
-                key={p.id}
-                onClick={() => setSelectedId(p.id)}
-                className="rounded-xl border p-4 text-left transition hover:border-cyan-300 hover:bg-cyan-50/30"
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 font-semibold">
-                      {`${p.first_name}${p.last_name}`.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="font-semibold">
+        <div className="overflow-x-auto rounded-xl border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Pacienti</TableHead>
+                <TableHead>Kontakti</TableHead>
+                <TableHead>Terminet</TableHead>
+                <TableHead>Vizita e fundit</TableHead>
+                <TableHead>Termini tjetër</TableHead>
+                <TableHead>Statusi</TableHead>
+                <TableHead className="text-right">Veprime</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {patients.map((p) => {
+                const appointments = patientAppointments(p);
+                const past = appointments.filter((a) => new Date(a.start_at) < new Date());
+                const next = [...appointments]
+                  .filter((a) => new Date(a.start_at) >= new Date())
+                  .sort((a, b) => a.start_at.localeCompare(b.start_at))[0];
+                const latest = past[0] ?? appointments[0];
+                return (
+                  <TableRow key={p.id} className={!p.active ? "opacity-60" : undefined}>
+                    <TableCell>
+                      <button
+                        type="button"
+                        className="text-left font-semibold hover:text-primary"
+                        onClick={() => setSelectedId(p.id)}
+                      >
                         {p.first_name} {p.last_name}
+                      </button>
+                      <p className="text-xs text-muted-foreground">
+                        {latest
+                          ? (props.physioById.get(latest.physiotherapist_id)?.first_name ?? "—")
+                          : "—"}
                       </p>
-                      <p className="text-sm text-slate-500">{p.phone}</p>
-                      <p className="text-xs text-slate-400">{p.email}</p>
-                    </div>
-                  </div>
-                  <Badge variant="secondary">{appointments.length} termine</Badge>
-                </div>
-                <div className="mt-4 grid grid-cols-2 gap-3 border-t pt-3 text-xs">
-                  <div>
-                    <p className="text-slate-400">Vizita e fundit</p>
-                    <p className="mt-1 font-medium">{latest ? localDay(latest.start_at) : "—"}</p>
-                  </div>
-                  <div>
-                    <p className="text-slate-400">Fizioterapeuti</p>
-                    <p className="mt-1 font-medium">
-                      {latest
-                        ? (props.physioById.get(latest.physiotherapist_id)?.first_name ?? "—")
-                        : "—"}
-                    </p>
-                  </div>
-                </div>
-                {next ? (
-                  <p className="mt-3 text-xs text-cyan-700">
-                    Termini tjetër: {formatDateTime(next.start_at)}
-                  </p>
-                ) : null}
-              </button>
-            );
-          })}
+                    </TableCell>
+                    <TableCell>
+                      <p>{p.phone || "—"}</p>
+                      <p className="text-xs text-muted-foreground">{p.email || "—"}</p>
+                    </TableCell>
+                    <TableCell>{appointments.length}</TableCell>
+                    <TableCell>{latest ? localDay(latest.start_at) : "—"}</TableCell>
+                    <TableCell>{next ? formatDateTime(next.start_at) : "—"}</TableCell>
+                    <TableCell>
+                      <StatusBadge status={p.active ? "ACTIVE" : "INACTIVE"} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex justify-end gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setSelectedId(p.id)}>
+                          Shiko
+                        </Button>
+                        {props.role !== "PHYSIOTHERAPIST" ? (
+                          <Button size="sm" variant="outline" onClick={() => setPatientEditor(p)}>
+                            Ndrysho
+                          </Button>
+                        ) : null}
+                        {["CLINIC_ADMIN", "RECEPTIONIST", "SUPER_ADMIN"].includes(props.role) ? (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            disabled={updatingPatientId === p.id}
+                            onClick={() => void togglePatientActive(p)}
+                          >
+                            {p.active ? "Çaktivizo" : "Aktivizo"}
+                          </Button>
+                        ) : null}
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <EmptyState
@@ -2141,7 +2410,10 @@ function PatientDetail({
 }) {
   const historyAvailable = Boolean(props.clinic.session_history_enabled);
   const canWriteNotes =
-    historyAvailable && Boolean(props.clinic.session_notes_enabled) && patient.keep_session_history;
+    historyAvailable &&
+    Boolean(props.clinic.session_notes_enabled) &&
+    patient.keep_session_history &&
+    props.canAuthorSessionNote;
   return (
     <div
       className="fixed inset-0 z-50 flex justify-end bg-slate-950/35"
@@ -2160,7 +2432,17 @@ function PatientDetail({
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={edit}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={edit}
+              disabled={!["CLINIC_ADMIN", "RECEPTIONIST", "SUPER_ADMIN"].includes(props.role)}
+              title={
+                props.role === "PHYSIOTHERAPIST"
+                  ? "Të dhënat administrative ndryshohen nga recepsioni ose administratori."
+                  : undefined
+              }
+            >
               Edito
             </Button>
             <Button variant="ghost" size="icon" onClick={close}>
@@ -2308,8 +2590,14 @@ function PatientDetail({
 
 function TeamView(props: Parameters<typeof WorkspaceView>[0]) {
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [servicePractitioner, setServicePractitioner] = useState<Physio | null>(null);
+  const [approvingPhysioId, setApprovingPhysioId] = useState<string | null>(null);
   const queryClient = useQueryClient();
-  const { data: roster = [] } = useQuery<TeamMember[]>({
+  const {
+    data: roster = [],
+    isLoading: rosterLoading,
+    error: rosterError,
+  } = useQuery<TeamMember[]>({
     queryKey: ["clinic-team-roster", props.clinic.id],
     queryFn: async () => {
       const { data, error } = await db.rpc("get_clinic_team_members", {
@@ -2319,7 +2607,7 @@ function TeamView(props: Parameters<typeof WorkspaceView>[0]) {
       return data ?? [];
     },
   });
-  const { data: invitations = [] } = useQuery<ClinicInvitation[]>({
+  const { data: invitations = [], error: invitationsError } = useQuery<ClinicInvitation[]>({
     queryKey: ["clinic-team-invitations", props.clinic.id],
     enabled: props.canManage,
     queryFn: async () => {
@@ -2334,7 +2622,7 @@ function TeamView(props: Parameters<typeof WorkspaceView>[0]) {
       return data ?? [];
     },
   });
-  const { data: assignments = [] } = useQuery<
+  const { data: assignments = [], error: assignmentsError } = useQuery<
     Array<{ physiotherapist_id: string; clinic_location_id: string; active: boolean }>
   >({
     queryKey: ["clinic-location-assignments", props.clinic.id],
@@ -2343,6 +2631,33 @@ function TeamView(props: Parameters<typeof WorkspaceView>[0]) {
         .from("physiotherapist_locations")
         .select("physiotherapist_id,clinic_location_id,active")
         .eq("clinic_id", props.clinic.id);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const { data: serviceAssignments = [] } = useQuery<
+    Array<{ physiotherapist_id: string; clinic_service_id: string; active: boolean }>
+  >({
+    queryKey: ["clinic-service-assignments", props.clinic.id],
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("physiotherapist_services")
+        .select("physiotherapist_id,clinic_service_id,active")
+        .eq("clinic_id", props.clinic.id);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const { data: serviceCategories = [] } = useQuery<
+    Array<{ id: string; name: string; sort_order: number; active: boolean }>
+  >({
+    queryKey: ["clinic-team-service-categories", props.clinic.id],
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("clinic_service_categories")
+        .select("id,name,sort_order,active")
+        .eq("clinic_id", props.clinic.id)
+        .order("sort_order");
       if (error) throw error;
       return data ?? [];
     },
@@ -2361,6 +2676,24 @@ function TeamView(props: Parameters<typeof WorkspaceView>[0]) {
     await queryClient.invalidateQueries({ queryKey: ["clinic-location-assignments"] });
     toast.success("Caktimi u ruajt.");
   }
+  async function approvePractitioner(physioId: string) {
+    setApprovingPhysioId(physioId);
+    const { error } = await db.rpc("approve_clinic_practitioner", {
+      _clinic_id: props.clinic.id,
+      _physio_id: physioId,
+    });
+    setApprovingPhysioId(null);
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["clinic-workspace-team", props.clinic.id] }),
+      queryClient.invalidateQueries({ queryKey: ["clinic-team-roster", props.clinic.id] }),
+      queryClient.invalidateQueries({ queryKey: ["public-service-practitioners"] }),
+    ]);
+    toast.success("Profili u aprovua dhe mund të shfaqet në rezervimin publik.");
+  }
   return (
     <Section
       title="Ekipi"
@@ -2374,69 +2707,162 @@ function TeamView(props: Parameters<typeof WorkspaceView>[0]) {
         ) : undefined
       }
     >
-      {props.team.length ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-          {props.team.map((p) => (
-            <div key={p.id} className="rounded-xl border p-4">
-              <div className="flex gap-3">
-                <div className="h-12 w-12 overflow-hidden rounded-full bg-slate-100">
-                  {p.photo_url ? (
-                    <img src={p.photo_url} alt="" className="h-full w-full object-cover" />
-                  ) : (
-                    <UserRound className="m-3 h-6 w-6 text-slate-400" />
-                  )}
-                </div>
-                <div className="min-w-0">
-                  <p className="truncate font-semibold">
-                    {p.first_name} {p.last_name}
-                  </p>
-                  <p className="text-sm text-slate-500">
-                    {p.professional_title ?? "Fizioterapeut"}
-                  </p>
-                  <p className="mt-1 text-xs font-medium text-cyan-700">
-                    {props.memberships.find((membership) => membership.user_id === p.user_id)
-                      ?.role ?? "PHYSIOTHERAPIST"}
-                  </p>
-                </div>
-              </div>
-              <div className="mt-4 flex items-center justify-between border-t pt-3">
-                <StatusBadge status={p.status} />
-                <span className="text-xs text-slate-500">
-                  {
-                    props.appointments.filter(
-                      (a) =>
-                        a.physiotherapist_id === p.id &&
-                        new Date(a.start_at).toDateString() === new Date().toDateString(),
+      {rosterError || invitationsError || assignmentsError ? (
+        <p
+          role="alert"
+          className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800"
+        >
+          Ekipi nuk u ngarkua plotësisht. Rifresko faqen ose kontrollo lejet e klinikës.
+        </p>
+      ) : rosterLoading ? (
+        <Skeleton className="mb-4 h-24 w-full rounded-xl" />
+      ) : null}
+      {roster.length ? (
+        <div className="overflow-x-auto rounded-xl border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Anëtari</TableHead>
+                <TableHead>Roli</TableHead>
+                <TableHead>Profili</TableHead>
+                <TableHead>Termine sot</TableHead>
+                <TableHead>Lokacionet</TableHead>
+                <TableHead>Shërbimet</TableHead>
+                <TableHead>Statusi</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {roster.map((member) => {
+                const physio = member.physiotherapist_id
+                  ? props.team.find((item) => item.id === member.physiotherapist_id)
+                  : null;
+                const todayCount = physio
+                  ? props.appointments.filter(
+                      (appointment) =>
+                        appointment.physiotherapist_id === physio.id &&
+                        new Date(appointment.start_at).toDateString() === new Date().toDateString(),
                     ).length
-                  }{" "}
-                  sot
-                </span>
-              </div>
-              {props.canManage ? (
-                <div className="mt-3 space-y-2 border-t pt-3">
-                  {props.locations
-                    .filter((l) => l.active)
-                    .map((l) => {
-                      const active = assignments.some(
-                        (a) =>
-                          a.physiotherapist_id === p.id &&
-                          a.clinic_location_id === l.id &&
-                          a.active,
-                      );
-                      return (
-                        <label key={l.id} className="flex items-center justify-between text-xs">
-                          {l.name}
-                          <Switch
-                            checked={active}
-                            onCheckedChange={(value) => void toggleAssignment(p.id, l.id, value)}
-                          />
-                        </label>
-                      );
-                    })}
-                </div>
-              ) : null}
-            </div>
-          ))}
+                  : 0;
+                return (
+                  <TableRow
+                    key={member.membership_id}
+                    className={!member.active ? "opacity-60" : undefined}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className="h-9 w-9 shrink-0 overflow-hidden rounded-full bg-slate-100">
+                          {physio?.photo_url ? (
+                            <img
+                              src={physio.photo_url}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <UserRound className="m-2 h-5 w-5 text-slate-400" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-medium">
+                            {[member.first_name, member.last_name].filter(Boolean).join(" ") ||
+                              member.email ||
+                              "Anëtar"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {member.email || physio?.professional_title || "—"}
+                          </p>
+                        </div>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">
+                        {member.role === "RECEPTIONIST"
+                          ? "Recepsionist"
+                          : member.role === "CLINIC_ADMIN"
+                            ? "Administrator"
+                            : "Fizioterapeut"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {physio ? (
+                        <div className="flex min-w-36 flex-col items-start gap-2">
+                          <StatusBadge status={physio.status} />
+                          {props.canManage &&
+                          ["DRAFT", "PENDING_APPROVAL", "REJECTED"].includes(physio.status) ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={approvingPhysioId === physio.id}
+                              onClick={() => void approvePractitioner(physio.id)}
+                            >
+                              {approvingPhysioId === physio.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <CheckCircle2 className="h-4 w-4" />
+                              )}
+                              Aprovo profilin
+                            </Button>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Pa profil</span>
+                      )}
+                    </TableCell>
+                    <TableCell>{todayCount}</TableCell>
+                    <TableCell>
+                      {physio ? (
+                        <div className="min-w-52 space-y-2">
+                          {props.locations
+                            .filter((location) => location.active)
+                            .map((location) => {
+                              const active = assignments.some(
+                                (assignment) =>
+                                  assignment.physiotherapist_id === physio.id &&
+                                  assignment.clinic_location_id === location.id &&
+                                  assignment.active,
+                              );
+                              return (
+                                <label
+                                  key={location.id}
+                                  className="flex items-center justify-between gap-3 text-xs"
+                                >
+                                  <span>{location.name}</span>
+                                  <Switch
+                                    disabled={!props.canManage}
+                                    checked={active}
+                                    onCheckedChange={(value) =>
+                                      void toggleAssignment(physio.id, location.id, value)
+                                    }
+                                  />
+                                </label>
+                              );
+                            })}
+                        </div>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Nuk aplikohet</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {physio ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!props.canManage}
+                          onClick={() => setServicePractitioner(physio)}
+                        >
+                          Menaxho
+                        </Button>
+                      ) : (
+                        <span className="text-sm text-muted-foreground">Nuk aplikohet</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <StatusBadge status={member.active ? "ACTIVE" : "INACTIVE"} />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         </div>
       ) : (
         <EmptyState
@@ -2445,31 +2871,6 @@ function TeamView(props: Parameters<typeof WorkspaceView>[0]) {
           body="Nuk ka fizioterapeutë të lidhur me këtë klinikë."
         />
       )}
-      {roster.filter((member) => !member.physiotherapist_id).length ? (
-        <div className="mt-6">
-          <h3 className="mb-3 font-semibold">Anëtarët tjerë aktivë</h3>
-          <div className="divide-y rounded-xl border">
-            {roster
-              .filter((member) => !member.physiotherapist_id)
-              .map((member) => (
-                <div
-                  key={member.membership_id}
-                  className="flex items-center justify-between gap-3 p-4"
-                >
-                  <div>
-                    <p className="font-medium">
-                      {[member.first_name, member.last_name].filter(Boolean).join(" ") ||
-                        member.email ||
-                        "Anëtar"}
-                    </p>
-                    <p className="text-sm text-slate-500">{member.email}</p>
-                  </div>
-                  <Badge>{member.role === "RECEPTIONIST" ? "Recepsionist" : member.role}</Badge>
-                </div>
-              ))}
-          </div>
-        </div>
-      ) : null}
       {props.canManage && invitations.length ? (
         <div className="mt-6">
           <h3 className="mb-3 font-semibold">Ftesat në pritje</h3>
@@ -2496,6 +2897,90 @@ function TeamView(props: Parameters<typeof WorkspaceView>[0]) {
         }
         onClose={() => setInviteOpen(false)}
       />
+      <Dialog
+        open={Boolean(servicePractitioner)}
+        onOpenChange={(open) => !open && setServicePractitioner(null)}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Shërbimet · {servicePractitioner?.first_name} {servicePractitioner?.last_name}
+            </DialogTitle>
+            <DialogDescription>
+              Vetëm shërbimet aktive të zgjedhura mund të rezervohen me këtë profesionist.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5">
+            {[
+              ...serviceCategories.filter((category) => category.active),
+              { id: "__none", name: "Të tjera", sort_order: 999999, active: true },
+            ].map((category) => {
+              const categoryServices = props.services.filter(
+                (service) =>
+                  service.active &&
+                  (category.id === "__none"
+                    ? !service.category_id
+                    : service.category_id === category.id),
+              );
+              if (!categoryServices.length) return null;
+              return (
+                <div key={category.id}>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    {category.name}
+                  </p>
+                  <div className="divide-y rounded-xl border">
+                    {categoryServices.map((service) => {
+                      const checked = serviceAssignments.some(
+                        (assignment) =>
+                          assignment.physiotherapist_id === servicePractitioner?.id &&
+                          assignment.clinic_service_id === service.id &&
+                          assignment.active,
+                      );
+                      return (
+                        <label
+                          key={service.id}
+                          className="flex items-center justify-between gap-4 p-3 text-sm"
+                        >
+                          <span>
+                            <span className="block font-medium">{service.name}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {service.duration_minutes} min ·{" "}
+                              {formatPrice(service.price, service.currency)}
+                            </span>
+                          </span>
+                          <Switch
+                            checked={checked}
+                            onCheckedChange={async (active) => {
+                              const { error } = await db.rpc("set_clinic_service_assignment", {
+                                _clinic_id: props.clinic.id,
+                                _physio_id: servicePractitioner?.id,
+                                _clinic_service_id: service.id,
+                                _active: active,
+                              });
+                              if (error) {
+                                toast.error(error.message);
+                                return;
+                              }
+                              await queryClient.invalidateQueries({
+                                queryKey: ["clinic-service-assignments", props.clinic.id],
+                              });
+                            }}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setServicePractitioner(null)}>
+              Mbyll
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Section>
   );
 }
@@ -2585,7 +3070,9 @@ function InviteEditor({
 
 function ServicesView(props: Parameters<typeof WorkspaceView>[0]) {
   if (props.canManage)
-    return <ClinicContentManager clinicId={props.clinic.id} clinicName={props.clinic.name} />;
+    return (
+      <ClinicContentManager clinicId={props.clinic.id} currentPhysioId={props.currentPhysioId} />
+    );
   return (
     <Section title="Shërbimet" description="Konfigurimi është vetëm për lexim për rolin tënd.">
       {props.services.length ? (
@@ -2688,12 +3175,13 @@ function LocationEditor({
   const [name, setName] = useState(location?.name ?? "");
   const [address, setAddress] = useState(location?.address ?? "");
   const [phone, setPhone] = useState(location?.phone ?? "");
-  const [timezone, setTimezone] = useState("Europe/Belgrade");
+  const [timezone, setTimezone] = useState(location?.timezone ?? "Europe/Belgrade");
   const [saving, setSaving] = useState(false);
   useEffect(() => {
     setName(location?.name ?? "");
     setAddress(location?.address ?? "");
     setPhone(location?.phone ?? "");
+    setTimezone(location?.timezone ?? "Europe/Belgrade");
   }, [location, open]);
   async function call(fn: string, args: Record<string, unknown>, message: string) {
     setSaving(true);
@@ -2754,6 +3242,31 @@ function LocationEditor({
             >
               Çaktivizo
             </Button>
+          ) : location ? (
+            <Button
+              variant="outline"
+              onClick={() =>
+                void call(
+                  "save_clinic_location",
+                  {
+                    _clinic_id: clinicId,
+                    _location_id: location.id,
+                    _name: name,
+                    _address: address || null,
+                    _city_id: null,
+                    _region_id: null,
+                    _phone: phone || null,
+                    _latitude: null,
+                    _longitude: null,
+                    _timezone: timezone,
+                    _active: true,
+                  },
+                  "Lokacioni u aktivizua.",
+                )
+              }
+            >
+              Aktivizo
+            </Button>
           ) : null}
         </div>
         <DialogFooter>
@@ -2790,215 +3303,367 @@ function LocationEditor({
   );
 }
 
+type PersonalScheduleDay = {
+  day_of_week: number;
+  label: string;
+  enabled: boolean;
+  start_time: string;
+  end_time: string;
+  break_start: string;
+  break_end: string;
+};
+
+const PERSONAL_WEEK: PersonalScheduleDay[] = [
+  {
+    day_of_week: 0,
+    label: "E diel",
+    enabled: false,
+    start_time: "08:00",
+    end_time: "16:00",
+    break_start: "",
+    break_end: "",
+  },
+  {
+    day_of_week: 1,
+    label: "E hënë",
+    enabled: true,
+    start_time: "08:00",
+    end_time: "16:00",
+    break_start: "",
+    break_end: "",
+  },
+  {
+    day_of_week: 2,
+    label: "E martë",
+    enabled: true,
+    start_time: "08:00",
+    end_time: "16:00",
+    break_start: "",
+    break_end: "",
+  },
+  {
+    day_of_week: 3,
+    label: "E mërkurë",
+    enabled: true,
+    start_time: "08:00",
+    end_time: "16:00",
+    break_start: "",
+    break_end: "",
+  },
+  {
+    day_of_week: 4,
+    label: "E enjte",
+    enabled: true,
+    start_time: "08:00",
+    end_time: "16:00",
+    break_start: "",
+    break_end: "",
+  },
+  {
+    day_of_week: 5,
+    label: "E premte",
+    enabled: true,
+    start_time: "08:00",
+    end_time: "16:00",
+    break_start: "",
+    break_end: "",
+  },
+  {
+    day_of_week: 6,
+    label: "E shtunë",
+    enabled: false,
+    start_time: "08:00",
+    end_time: "16:00",
+    break_start: "",
+    break_end: "",
+  },
+];
+
 function AvailabilityView(props: Parameters<typeof WorkspaceView>[0]) {
   const queryClient = useQueryClient();
-  const [locationId, setScheduleLocation] = useState(props.locations[0]?.id ?? "");
-  const [physioId, setSchedulePhysio] = useState(props.team[0]?.id ?? "");
-  const [day, setScheduleDay] = useState("1");
-  const [start, setScheduleStart] = useState("08:00");
-  const [end, setScheduleEnd] = useState("16:00");
-  const [breakStart, setBreakStart] = useState("");
-  const [breakEnd, setBreakEnd] = useState("");
-  const [enabled, setEnabled] = useState(true);
+  const physioId = props.currentPhysioId;
+  const [locationId, setLocationId] = useState("");
+  const [days, setDays] = useState<PersonalScheduleDay[]>(() =>
+    PERSONAL_WEEK.map((item) => ({ ...item })),
+  );
   const [saving, setSaving] = useState(false);
+  const [loadedKey, setLoadedKey] = useState("");
+
+  const {
+    data: assignments = [],
+    isLoading: assignmentsLoading,
+    error: assignmentsError,
+  } = useQuery<Array<{ clinic_location_id: string }>>({
+    queryKey: ["my-location-assignments", props.clinic.id, physioId],
+    enabled: Boolean(physioId),
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("physiotherapist_locations")
+        .select("clinic_location_id")
+        .eq("clinic_id", props.clinic.id)
+        .eq("physiotherapist_id", physioId)
+        .eq("active", true);
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const assignedLocationIds = useMemo(
+    () => new Set(assignments.map((item) => item.clinic_location_id)),
+    [assignments],
+  );
+  const assignedLocations = useMemo(
+    () =>
+      props.locations.filter((location) => location.active && assignedLocationIds.has(location.id)),
+    [assignedLocationIds, props.locations],
+  );
+
   useEffect(() => {
-    if (!locationId && props.locations[0]) setScheduleLocation(props.locations[0].id);
-    if (!physioId && props.team[0]) setSchedulePhysio(props.team[0].id);
-  }, [locationId, physioId, props.locations, props.team]);
-  const { data: schedules = [] } = useQuery<
+    if (!assignedLocations.length) {
+      setLocationId("");
+      return;
+    }
+    if (!assignedLocations.some((location) => location.id === locationId)) {
+      setLocationId(assignedLocations[0]!.id);
+    }
+  }, [assignedLocations, locationId]);
+
+  const {
+    data: schedules = [],
+    isLoading: schedulesLoading,
+    error: schedulesError,
+  } = useQuery<
     Array<{
       id: string;
-      location_id: string;
-      physiotherapist_id: string;
       day_of_week: number;
       start_time: string;
       end_time: string;
     }>
   >({
-    queryKey: ["location-schedules", props.clinic.id],
+    queryKey: ["my-weekly-schedule", props.clinic.id, locationId, physioId],
+    enabled: Boolean(locationId && physioId),
     queryFn: async () => {
       const { data, error } = await db
         .from("physiotherapist_location_working_hours")
-        .select("id,location_id,physiotherapist_id,day_of_week,start_time,end_time")
+        .select("id,day_of_week,start_time,end_time")
         .eq("clinic_id", props.clinic.id)
+        .eq("location_id", locationId)
+        .eq("physiotherapist_id", physioId)
+        .eq("active", true)
         .order("day_of_week");
       if (error) throw error;
       return data ?? [];
     },
   });
-  async function addSchedule() {
-    if (!locationId || !physioId) {
-      toast.error("Zgjidh lokacionin dhe fizioterapeutin.");
-      return;
+  const { data: scheduleBreaks = [], error: breaksError } = useQuery<
+    Array<{ schedule_id: string; start_time: string; end_time: string }>
+  >({
+    queryKey: ["my-weekly-schedule-breaks", schedules.map((item) => item.id)],
+    enabled: schedules.length > 0,
+    queryFn: async () => {
+      const { data, error } = await db
+        .from("physiotherapist_location_schedule_breaks")
+        .select("schedule_id,start_time,end_time")
+        .in(
+          "schedule_id",
+          schedules.map((item) => item.id),
+        );
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+
+  useEffect(() => {
+    if (!locationId || schedulesLoading) return;
+    const nextKey = `${locationId}:${schedules
+      .map((item) => `${item.id}:${item.start_time}:${item.end_time}`)
+      .join("|")}:${scheduleBreaks
+      .map((item) => `${item.schedule_id}:${item.start_time}:${item.end_time}`)
+      .join("|")}`;
+    if (nextKey === loadedKey) return;
+    setDays(
+      PERSONAL_WEEK.map((base) => {
+        const schedule = schedules.find((item) => item.day_of_week === base.day_of_week);
+        const pause = scheduleBreaks.find((item) => item.schedule_id === schedule?.id);
+        return schedule
+          ? {
+              ...base,
+              enabled: true,
+              start_time: schedule.start_time.slice(0, 5),
+              end_time: schedule.end_time.slice(0, 5),
+              break_start: pause?.start_time.slice(0, 5) ?? "",
+              break_end: pause?.end_time.slice(0, 5) ?? "",
+            }
+          : { ...base, enabled: false };
+      }),
+    );
+    setLoadedKey(nextKey);
+  }, [loadedKey, locationId, scheduleBreaks, schedules, schedulesLoading]);
+
+  function updateDay(dayOfWeek: number, patch: Partial<PersonalScheduleDay>) {
+    setDays((current) =>
+      current.map((item) => (item.day_of_week === dayOfWeek ? { ...item, ...patch } : item)),
+    );
+  }
+
+  async function saveWeek() {
+    if (!physioId || !locationId) return;
+    for (const item of days) {
+      if (
+        item.enabled &&
+        (!item.start_time || !item.end_time || item.start_time >= item.end_time)
+      ) {
+        toast.error(`Kontrollo orarin për ${item.label}.`);
+        return;
+      }
+      if (item.enabled && Boolean(item.break_start) !== Boolean(item.break_end)) {
+        toast.error(`Plotëso të dy fushat e pushimit për ${item.label}.`);
+        return;
+      }
     }
     setSaving(true);
-    const { error } = await db.rpc("save_clinic_staff_schedule", {
+    const { error } = await db.rpc("save_my_weekly_schedule", {
       _clinic_id: props.clinic.id,
       _location_id: locationId,
-      _physiotherapist_id: physioId,
-      _day_of_week: Number(day),
-      _enabled: enabled,
-      _start_time: enabled ? start : null,
-      _end_time: enabled ? end : null,
-      _break_start: enabled && breakStart ? breakStart : null,
-      _break_end: enabled && breakEnd ? breakEnd : null,
+      _days: days,
     });
     setSaving(false);
     if (error) {
       toast.error(error.message);
       return;
     }
+    setLoadedKey("");
+    await queryClient.invalidateQueries({ queryKey: ["my-weekly-schedule"] });
     await queryClient.invalidateQueries({ queryKey: ["location-schedules"] });
-    toast.success(enabled ? "Orari u ruajt." : "Dita u shënua pushim.");
+    toast.success("Orari yt u ruajt.");
   }
-  async function removeSchedule(id: string) {
-    const { error } = await db.from("physiotherapist_location_working_hours").delete().eq("id", id);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    await queryClient.invalidateQueries({ queryKey: ["location-schedules"] });
+
+  if (!physioId) {
+    return (
+      <EmptyState
+        icon={CalendarDays}
+        title="Profili i fizioterapeutit mungon"
+        body="Orari personal mund të rregullohet pasi ky përdorues të ketë profil fizioterapeuti në klinikë."
+      />
+    );
   }
+
+  if (assignmentsLoading) return <Skeleton className="h-96 w-full rounded-2xl" />;
+  if (assignmentsError) {
+    return (
+      <p role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 text-red-800">
+        Lokacionet e tua nuk u ngarkuan.
+      </p>
+    );
+  }
+  if (!assignedLocations.length) {
+    return (
+      <EmptyState
+        icon={MapPin}
+        title="Nuk ke lokacion të caktuar"
+        body="Administratori duhet së pari të të caktojë në të paktën një lokacion të klinikës."
+      />
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <Section
-        title="Disponueshmëria e klinikës"
-        description="Zgjidh fizioterapeutin, lokacionin dhe cakto vetë ditët, orarin dhe pauzën."
-      >
-        {props.canManage ? (
-          <div className="space-y-4">
-            <div className="grid gap-2 md:grid-cols-3">
-              <select
-                className="h-10 rounded-md border px-2"
-                value={locationId}
-                onChange={(e) => setScheduleLocation(e.target.value)}
-              >
-                {props.locations
-                  .filter((l) => l.active)
-                  .map((l) => (
-                    <option key={l.id} value={l.id}>
-                      {l.name}
-                    </option>
-                  ))}
-              </select>
-              <select
-                className="h-10 rounded-md border px-2"
-                value={physioId}
-                onChange={(e) => setSchedulePhysio(e.target.value)}
-              >
-                {props.team.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.first_name} {p.last_name}
-                  </option>
-                ))}
-              </select>
-              <select
-                className="h-10 rounded-md border px-2"
-                value={day}
-                onChange={(e) => setScheduleDay(e.target.value)}
-              >
-                {["Diel", "Hënë", "Martë", "Mërkurë", "Enjte", "Premte", "Shtunë"].map((x, i) => (
-                  <option key={x} value={i}>
-                    {x}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="rounded-xl border p-4">
-              <label className="flex items-center gap-3 font-medium">
-                <Switch checked={enabled} onCheckedChange={setEnabled} />
-                {enabled ? "Punon këtë ditë" : "Pushim këtë ditë"}
-              </label>
-              {enabled ? (
-                <div className="mt-4 grid gap-3 md:grid-cols-4">
-                  <label className="text-xs text-slate-500">
-                    Fillimi
-                    <Input
-                      className="mt-1"
-                      type="time"
-                      value={start}
-                      onChange={(e) => setScheduleStart(e.target.value)}
-                    />
-                  </label>
-                  <label className="text-xs text-slate-500">
-                    Mbarimi
-                    <Input
-                      className="mt-1"
-                      type="time"
-                      value={end}
-                      onChange={(e) => setScheduleEnd(e.target.value)}
-                    />
-                  </label>
-                  <label className="text-xs text-slate-500">
-                    Pauza nga
-                    <Input
-                      className="mt-1"
-                      type="time"
-                      value={breakStart}
-                      onChange={(e) => setBreakStart(e.target.value)}
-                    />
-                  </label>
-                  <label className="text-xs text-slate-500">
-                    Pauza deri
-                    <Input
-                      className="mt-1"
-                      type="time"
-                      value={breakEnd}
-                      onChange={(e) => setBreakEnd(e.target.value)}
-                    />
-                  </label>
-                </div>
-              ) : null}
-            </div>
-            <Button
-              disabled={saving || !locationId || !physioId}
-              onClick={() => void addSchedule()}
+    <Section
+      title="Orari i punës"
+      description="Cakto orarin tënd për çdo ditë. Mund të shtosh edhe një pushim gjatë ditës."
+    >
+      <div className="space-y-4">
+        {assignedLocations.length > 1 ? (
+          <label className="block max-w-sm text-sm font-medium">
+            Lokacioni
+            <select
+              className="mt-1 h-10 w-full rounded-md border px-3"
+              value={locationId}
+              onChange={(event) => {
+                setLocationId(event.target.value);
+                setLoadedKey("");
+              }}
             >
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null} Ruaj këtë ditë
-            </Button>
-            <p className="text-xs text-slate-500">
-              Fizioterapeuti duhet të jetë i caktuar në lokacion te seksioni Ekipi.
-            </p>
-            <div className="divide-y">
-              {schedules.map((s) => (
-                <div key={s.id} className="flex items-center justify-between py-3 text-sm">
-                  <span>
-                    {props.locations.find((l) => l.id === s.location_id)?.name} ·{" "}
-                    {props.physioById.get(s.physiotherapist_id)?.first_name} · dita {s.day_of_week}{" "}
-                    · {s.start_time.slice(0, 5)}–{s.end_time.slice(0, 5)}
-                  </span>
-                  <div className="flex gap-2">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        setScheduleLocation(s.location_id);
-                        setSchedulePhysio(s.physiotherapist_id);
-                        setScheduleDay(String(s.day_of_week));
-                        setScheduleStart(s.start_time.slice(0, 5));
-                        setScheduleEnd(s.end_time.slice(0, 5));
-                        setEnabled(true);
-                      }}
-                    >
-                      Ndrysho
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => void removeSchedule(s.id)}>
-                      Hiq
-                    </Button>
-                  </div>
-                </div>
+              {assignedLocations.map((location) => (
+                <option key={location.id} value={location.id}>
+                  {location.name}
+                </option>
               ))}
-            </div>
-          </div>
+            </select>
+          </label>
         ) : (
-          <EmptyState
-            icon={CalendarDays}
-            title="Vetëm për lexim"
-            body="Ndryshimet e orarit të klinikës lejohen vetëm për administratorin."
-          />
+          <p className="text-sm text-muted-foreground">
+            Lokacioni:{" "}
+            <span className="font-medium text-foreground">{assignedLocations[0]!.name}</span>
+          </p>
         )}
-      </Section>
-    </div>
+
+        {schedulesError || breaksError ? (
+          <p
+            role="alert"
+            className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
+          >
+            Orari nuk u ngarkua plotësisht nga databaza.
+          </p>
+        ) : schedulesLoading ? (
+          <Skeleton className="h-80 w-full rounded-2xl" />
+        ) : (
+          <div className="space-y-3">
+            {days.map((item) => (
+              <div key={item.day_of_week} className="rounded-2xl border bg-card p-4 md:p-5">
+                <div
+                  className={cn(
+                    "grid items-center gap-4",
+                    item.enabled && "md:grid-cols-[165px_repeat(4,minmax(0,1fr))]",
+                  )}
+                >
+                  <label className="flex items-center gap-3 font-medium">
+                    <Switch
+                      checked={item.enabled}
+                      onCheckedChange={(checked) =>
+                        updateDay(item.day_of_week, { enabled: checked })
+                      }
+                    />
+                    {item.label}
+                  </label>
+                  {item.enabled ? (
+                    <>
+                      {(
+                        [
+                          ["Hapja", "start_time"],
+                          ["Mbyllja", "end_time"],
+                          ["Pushim nga", "break_start"],
+                          ["Pushim deri", "break_end"],
+                        ] as const
+                      ).map(([label, field]) => (
+                        <label key={field} className="text-xs text-muted-foreground">
+                          {label}
+                          <Input
+                            className="mt-1 bg-background"
+                            type="time"
+                            value={item[field]}
+                            onChange={(event) =>
+                              updateDay(item.day_of_week, { [field]: event.target.value })
+                            }
+                          />
+                        </label>
+                      ))}
+                    </>
+                  ) : (
+                    <span className="text-sm text-muted-foreground">Mbyllur</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+        <Button
+          disabled={saving || schedulesLoading || !locationId}
+          onClick={() => void saveWeek()}
+        >
+          {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+          Ruaj orarin
+        </Button>
+      </div>
+    </Section>
   );
 }
 
@@ -3015,7 +3680,8 @@ function NotificationsView(props: Parameters<typeof WorkspaceView>[0]) {
         setMarkingId(null);
       }
     }
-    if (notification.link?.includes("terminet")) props.chooseView("appointments");
+    if (notification.link?.includes("terminet") || notification.link?.includes("appointments"))
+      props.chooseView("appointments");
   }
   return (
     <Section
@@ -3070,6 +3736,18 @@ function WebsiteView(props: Parameters<typeof WorkspaceView>[0]) {
   const [locationsVisible, setLocationsVisible] = useState(props.clinic.locations_visible ?? true);
   const [cta, setCta] = useState(props.clinic.booking_cta_enabled ?? true);
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setName(props.clinic.name);
+    setDescription(props.clinic.description ?? "");
+    setPhone(props.clinic.phone ?? "");
+    setEmail(props.clinic.email ?? "");
+    setAddress(props.clinic.address ?? "");
+    setListing(Boolean(props.clinic.public_listing_enabled));
+    setServicesVisible(props.clinic.services_visible ?? true);
+    setTeamVisible(props.clinic.team_visible ?? true);
+    setLocationsVisible(props.clinic.locations_visible ?? true);
+    setCta(props.clinic.booking_cta_enabled ?? true);
+  }, [props.clinic]);
   async function save(publish: boolean) {
     setSaving(true);
     try {
@@ -3176,6 +3854,7 @@ function WebsiteView(props: Parameters<typeof WorkspaceView>[0]) {
           </Button>
         </div>
       </Section>
+      <GalleryManager ownerType="CLINIC" ownerId={props.clinic.id} ownerName={props.clinic.name} />
     </div>
   );
 }
@@ -3287,6 +3966,10 @@ function SettingsView(props: Parameters<typeof WorkspaceView>[0]) {
   );
   const [notesEnabled, setNotesEnabled] = useState(Boolean(props.clinic.session_notes_enabled));
   const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    setHistoryEnabled(Boolean(props.clinic.session_history_enabled));
+    setNotesEnabled(Boolean(props.clinic.session_notes_enabled));
+  }, [props.clinic]);
 
   async function saveHistorySettings() {
     setSaving(true);
@@ -3354,26 +4037,26 @@ function SettingsView(props: Parameters<typeof WorkspaceView>[0]) {
       <Section title="Cilësimet" description="Seksionet e tjera sipas përgjegjësisë">
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {[
-            ["Profili i klinikës", Building2],
-            ["Lokacionet", MapPin],
-            ["Ekipi & permissions", ShieldCheck],
-            ["Booking", CalendarDays],
-            ["Njoftimet", Bell],
-            ["Website", Globe2],
-            ["Gjuha", Globe2],
-            ["Abonimi", CreditCard],
-            ["Siguria", ShieldCheck],
-          ].map(([label, Icon]) => {
+            ["Profili i klinikës", Building2, "website"],
+            ["Lokacionet", MapPin, "locations"],
+            ["Ekipi & permissions", ShieldCheck, "team"],
+            ["Booking", CalendarDays, "calendar"],
+            ["Njoftimet", Bell, "notifications"],
+            ["Website", Globe2, "website"],
+            ["Gjuha", Globe2, null],
+            ["Abonimi", CreditCard, "subscription"],
+            ["Siguria", ShieldCheck, null],
+          ].map(([label, Icon, target]) => {
             const I = Icon as ComponentType<{ className?: string }>;
             return (
               <button
                 key={label as string}
-                onClick={() =>
-                  props.unsupported(
-                    "Ky seksion do të lidhet vetëm me API/RLS ekzistuese të sigurta.",
-                  )
+                onClick={() => target && props.chooseView(target as View)}
+                disabled={!target}
+                title={
+                  !target ? "Backend-i për këtë seksion nuk është implementuar ende." : undefined
                 }
-                className="flex items-center gap-3 rounded-xl border p-4 text-left hover:bg-slate-50"
+                className="flex items-center gap-3 rounded-xl border p-4 text-left hover:bg-slate-50 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:opacity-50"
               >
                 <I className="h-5 w-5 text-slate-500" />
                 <span className="font-medium">{label as string}</span>

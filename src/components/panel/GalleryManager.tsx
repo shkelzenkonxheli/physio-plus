@@ -77,9 +77,12 @@ export function GalleryManager({
       toast.success("Fotografitë u shtuan.");
       invalidate();
     } catch (e) {
-      const msg = e instanceof Error && e.message.includes("GALLERY_LIMIT_REACHED")
-        ? `Ke arritur maksimumin prej ${MAX_IMAGES} fotografive.`
-        : e instanceof Error ? e.message : "Ngarkimi dështoi.";
+      const msg =
+        e instanceof Error && e.message.includes("GALLERY_LIMIT_REACHED")
+          ? `Ke arritur maksimumin prej ${MAX_IMAGES} fotografive.`
+          : e instanceof Error
+            ? e.message
+            : "Ngarkimi dështoi.";
       toast.error(msg);
     } finally {
       setBusy(false);
@@ -91,11 +94,23 @@ export function GalleryManager({
     <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="font-semibold">Galeria</h3>
-        <span className="text-sm text-muted-foreground">{count} / {MAX_IMAGES}</span>
+        <span className="text-sm text-muted-foreground">
+          {count} / {MAX_IMAGES}
+        </span>
       </div>
-      <Button asChild className="mt-4" size="sm" variant="outline" disabled={busy || count >= MAX_IMAGES}>
+      <Button
+        asChild
+        className="mt-4"
+        size="sm"
+        variant="outline"
+        disabled={busy || count >= MAX_IMAGES}
+      >
         <label className="cursor-pointer">
-          {busy ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <ImagePlus className="mr-2 h-4 w-4" />}
+          {busy ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <ImagePlus className="mr-2 h-4 w-4" />
+          )}
           {busy ? "Po ngarkohet..." : "+ Shto foto"}
           <input
             ref={inputRef}
@@ -111,8 +126,16 @@ export function GalleryManager({
       {images && images.length ? (
         <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
           {images.map((img) => (
-            <div key={img.id} className="group relative overflow-hidden rounded-xl border border-border">
-              <img src={img.url} alt={img.alt ?? ownerName} className="aspect-square w-full object-cover" loading="lazy" />
+            <div
+              key={img.id}
+              className="group relative overflow-hidden rounded-xl border border-border"
+            >
+              <img
+                src={img.url}
+                alt={img.alt ?? ownerName}
+                className="aspect-square w-full object-cover"
+                loading="lazy"
+              />
               <Button
                 size="icon"
                 variant="destructive"
